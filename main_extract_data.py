@@ -27,9 +27,9 @@ warnings.filterwarnings(
 #path_data = '../Data/standards/'
 
 ### Standards young L/T dwarfs
-known_data = Table.read('../Data/tables/youngstandards.csv')
-path_figures = '../Figures/'
-path_data = '../Data/spectra/'
+known_data = Table.read('Data/tables/youngstandards.csv')
+path_figures = 'Figures/'
+path_data = 'Data/spectra/'
 
 ### Disk Claire
 #known_data = Table.read('../Data/disk_claire/disk_claire.csv')
