@@ -39,24 +39,24 @@ def turn_num_to_spt(spt_num):
 
     return spt_letter
 
-def get_closest_standard_spectrum(spt_object):
-    standards = Table.read('../Data/standards/standards.csv')
+def get_closest_standard_spectrum(spt_object,path_data):
+    standards = Table.read(path_data + 'tables/standards.csv')
     standards_spt_num = turn_spt_to_num(standards['SpT'])
 
     find_standard = np.argmin(abs(standards_spt_num-spt_object))
     name_standard = standards['Name'][find_standard]
-    path_standard = '../Data/standards/Spherex_spec_'+name_standard+'.csv'
+    path_standard = path_data + 'spectra/Spherex_spec_'+name_standard+'.csv'
 
     return path_standard,find_standard
 
 
-def get_closest_youngstandard_spectrum(spt_object):
-    standards = Table.read('../Data/youngstandards/youngstandards.csv')
+def get_closest_youngstandard_spectrum(spt_object, path_data):
+    standards = Table.read(path_data + 'tables/youngstandards.csv')
     standards_spt_num = standards['SpT']
 
     find_standard = np.argmin(abs(standards_spt_num-spt_object))
     name_standard = standards['Name'][find_standard]
-    path_standard = '../Data/youngstandards/Spherex_spec_'+name_standard+'.csv'
+    path_standard = path_data + 'spectra/Spherex_spec_'+name_standard+'.csv'
 
     return path_standard,find_standard
 
