@@ -4,7 +4,6 @@ import numpy as np
 from astropy.table import Table
 import os
 import sys
-sys.path.append('../')
 from src import *
 import astropy
 from astropy.coordinates import SkyCoord
@@ -27,9 +26,9 @@ warnings.filterwarnings(
 #path_data = '../Data/standards/'
 
 ### Standards young L/T dwarfs
-known_data = Table.read('Data/tables/youngstandards.csv')
-path_figures = 'Figures/'
-path_data = 'Data/spectra/'
+#known_data = Table.read('Data/tables/youngstandards.csv')
+#path_figures = 'Figures/'
+#path_data = 'Data/spectra/'
 
 ### Disk Claire
 #known_data = Table.read('../Data/disk_claire/disk_claire.csv')
@@ -46,17 +45,17 @@ path_data = 'Data/spectra/'
 #    known_data[column] = np.array([float(x) for x in known_data[column]])
 
 ### Young LT dwarfs
-#youngLTdwarfs = Table.read('../Data/youngLTdwarfs/youngLTdwarfs.csv')
-#youngLTdwarfs = youngLTdwarfs[np.array(youngLTdwarfs['sptnum_ir_formula']) >= 10]
-#known_data = Table()
-#known_data['Name'] = youngLTdwarfs['name']
-#known_data['ra'] = youngLTdwarfs['ra_j2000_P1']
-#known_data['dec'] = youngLTdwarfs['dec_j2000_P1']
-#known_data['pmra'] = youngLTdwarfs['pmra_formula']
-#known_data['pmdec'] = youngLTdwarfs['pmdec_formula']
-#known_data['epoch'] = np.ones(len(youngLTdwarfs))*2000
-#path_figures = '../Figures/youngLTdwarfs/'
-#path_data = '../Data/youngLTdwarfs/'
+youngLTdwarfs = Table.read('Data/tables/youngLTdwarfs.csv')
+youngLTdwarfs = youngLTdwarfs[np.array(youngLTdwarfs['sptnum_ir_formula']) >= 9]
+known_data = Table()
+known_data['Name'] = youngLTdwarfs['name']
+known_data['ra'] = youngLTdwarfs['ra_j2000_P1']
+known_data['dec'] = youngLTdwarfs['dec_j2000_P1']
+known_data['pmra'] = youngLTdwarfs['pmra_formula']
+known_data['pmdec'] = youngLTdwarfs['pmdec_formula']
+known_data['epoch'] = np.ones(len(youngLTdwarfs))*2000
+path_figures = 'Figures/'
+path_data = 'Data/spectra/'
 
 ###subdwarfs
 #subdwarfs = Table.read('../Data/subdwarfs/subdwarfs.csv')
