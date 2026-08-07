@@ -1,19 +1,29 @@
 ## Code based on flux_calib.py by Genaro Suarez
+## See https://seda.readthedocs.io/en/latest/
 
 import numpy as np
 from astropy.io import ascii
 
 def get_zero_point(fil_phot_synt_i):
 	# from Jy to mag
-	if (fil_phot_synt_i == 'J'): 
+	if (fil_phot_synt_i == 'J_MKO'): 
 		phot_F0, ephot_F0 = 1544.03, 27.8 # Jy
-		wave0 = 12350.00
-	elif (fil_phot_synt_i == 'H'): 
+		wave0 = 12417.04
+	elif (fil_phot_synt_i == 'H_MKO'): 
 		phot_F0, ephot_F0 = 1034.80, 20.0 # Jy
-		wave0 = 16620.00
-	elif (fil_phot_synt_i == 'K'): 
+		wave0 = 16140.31
+	elif (fil_phot_synt_i == 'K_MKO'): 
 		phot_F0, ephot_F0 = 638.19, 12.6 # Jy
-		wave0 = 21590.00	
+		wave0 = 21840.23
+	elif (fil_phot_synt_i == 'J_2MASS'): 
+		phot_F0, ephot_F0 = 1594, 1594/50 # Jy
+		wave0 = 12350
+	elif (fil_phot_synt_i == 'H_2MASS'): 
+		phot_F0, ephot_F0 = 1024, 1024/50 # Jy
+		wave0 = 16620
+	elif (fil_phot_synt_i == 'K_2MASS'): 
+		phot_F0, ephot_F0 = 666.8, 666.8/50 # Jy
+		wave0 = 21590
 	elif (fil_phot_synt_i == 'F1000W'): 
 		phot_F0, ephot_F0 = 38.51, 38.51/50 # Jy
 		wave0 = 98793.45
@@ -30,14 +40,14 @@ def get_zero_point(fil_phot_synt_i):
 		phot_F0, ephot_F0 = 177.66, 177.66/50 # Jy
 		wave0 = 44365.56
 	elif (fil_phot_synt_i == 'W1'): 
-		phot_F0, ephot_F0 = 303.56, 303.56/50 # Jy
-		wave0 = 33526.00
+		phot_F0, ephot_F0 = 309.54, 309.54/50 # Jy
+		wave0 = 33526
 	elif (fil_phot_synt_i == 'W2'): 
-		phot_F0, ephot_F0 = 168.46, 168.46/50 # Jy
-		wave0 = 46028.00
+		phot_F0, ephot_F0 = 171.787, 171.787/50 # Jy
+		wave0 = 46028
 	elif (fil_phot_synt_i == 'W3'): 
-		phot_F0, ephot_F0 = 31.07, 31.07/50 # Jy
-		wave0 = 115608.00
+		phot_F0, ephot_F0 = 31.674, 31.674/50 # Jy
+		wave0 = 115608
 	elif (fil_phot_synt_i == 'Y'): 
 		phot_F0, ephot_F0 = 2070.63, 2070.63/50 # Jy
 		wave0 = 10182.69
@@ -53,6 +63,9 @@ def get_zero_point(fil_phot_synt_i):
 	elif (fil_phot_synt_i == 'F410M'): 
 		phot_F0, ephot_F0 = 208.75, 208.75/50 # Jy
 		wave0 = 40723.18
+	elif (fil_phot_synt_i == 'F360M'): 
+		phot_F0, ephot_F0 = 260.31, 260.31/50 # Jy
+		wave0 = 36148.93
 	elif (fil_phot_synt_i == 'F356W'): 
 		phot_F0, ephot_F0 = 271.39, 271.39/50 # Jy
 		wave0 = 35287.04
@@ -77,23 +90,44 @@ def get_zero_point(fil_phot_synt_i):
 	elif (fil_phot_synt_i == 'F182M'): 
 		phot_F0, ephot_F0 = 844.94, 844.94/50 # Jy
 		wave0 = 18388.83
+	elif (fil_phot_synt_i == 'F162M'): 
+		phot_F0, ephot_F0 = 1023.04, 1023.04/50 # Jy
+		wave0 = 16243.33
 	elif (fil_phot_synt_i == 'F150W'): 
 		phot_F0, ephot_F0 = 1172.06, 1172.06/50 # Jy
 		wave0 = 14872.56
+	elif (fil_phot_synt_i == 'F140M'): 
+		phot_F0, ephot_F0 = 1288.65, 1288.65/50 # Jy
+		wave0 = 14023.62	
+	elif (fil_phot_synt_i == 'F115W'): 
+		phot_F0, ephot_F0 = 1746.12, 1746.12/50 # Jy
+		wave0 = 11433.62
+	elif (fil_phot_synt_i == 'Lp_MKO'): 
+		phot_F0, ephot_F0 = 245.20, 245.20/50 # Jy
+		wave0 = 37302.87
+	elif (fil_phot_synt_i == 'Mp_MKO'): 
+		phot_F0, ephot_F0 = 160.62, 160.62/50 # Jy
+		wave0 = 46803.78
 	else:
 		print('Zero point for ' + fil_phot_synt_i + ' not included.')
 	
 	return wave0, phot_F0, ephot_F0
 
 
-def get_filter_response(fil_phot_synt_i, filter_path = '/Users/rociokiman/Dropbox (Hunter College)/papers/Coconuts2/Data/Filters/'):
+def get_filter_response(fil_phot_synt_i, filter_path):
 
-	if (fil_phot_synt_i == 'J'): 
+	if (fil_phot_synt_i == 'J_MKO'): 
 		filter_response = ascii.read(filter_path + 'MKO_NSFCam.J.dat')
-	elif (fil_phot_synt_i == 'H'): 
+	elif (fil_phot_synt_i == 'H_MKO'): 
 		filter_response = ascii.read(filter_path + 'MKO_NSFCam.H.dat')
-	elif (fil_phot_synt_i == 'K'): 
+	elif (fil_phot_synt_i == 'K_MKO'): 
 		filter_response = ascii.read(filter_path + 'MKO_NSFCam.K.dat')
+	elif (fil_phot_synt_i == 'J_2MASS'): 
+		filter_response = ascii.read(filter_path + '2MASS_2MASS.J.dat')
+	elif (fil_phot_synt_i == 'H_2MASS'): 
+		filter_response = ascii.read(filter_path + '2MASS_2MASS.H.dat')
+	elif (fil_phot_synt_i == 'K_2MASS'): 
+		filter_response = ascii.read(filter_path + '2MASS_2MASS.Ks.dat')
 	elif (fil_phot_synt_i == 'F1000W'): 
 		filter_response = ascii.read(filter_path + 'JWST_MIRI.F1000W.dat')
 	elif (fil_phot_synt_i == 'F1280W'): 
@@ -120,6 +154,8 @@ def get_filter_response(fil_phot_synt_i, filter_path = '/Users/rociokiman/Dropbo
 		filter_response = ascii.read(filter_path + 'JWST_NIRCam.F430M.dat')
 	elif (fil_phot_synt_i == 'F410M'): 
 		filter_response = ascii.read(filter_path + 'JWST_NIRCam.F410M.dat')
+	elif (fil_phot_synt_i == 'F360M'): 
+		filter_response = ascii.read(filter_path + 'JWST_NIRCam.F360M.dat')
 	elif (fil_phot_synt_i == 'F356W'): 
 		filter_response = ascii.read(filter_path + 'JWST_NIRCam.F356W.dat')
 	elif (fil_phot_synt_i == 'F335M'): 
@@ -136,36 +172,40 @@ def get_filter_response(fil_phot_synt_i, filter_path = '/Users/rociokiman/Dropbo
 		filter_response = ascii.read(filter_path + 'JWST_NIRCam.F200W.dat')
 	elif (fil_phot_synt_i == 'F182M'):
 		filter_response = ascii.read(filter_path + 'JWST_NIRCam.F182M.dat')
+	elif (fil_phot_synt_i == 'F162M'): 
+		filter_response = ascii.read(filter_path + 'JWST_NIRCam.F162M.dat')
 	elif (fil_phot_synt_i == 'F150W'): 
 		filter_response = ascii.read(filter_path + 'JWST_NIRCam.F150W.dat')
+	elif (fil_phot_synt_i == 'F140M'): 
+		filter_response = ascii.read(filter_path + 'JWST_NIRCam.F140M.dat')
+	elif (fil_phot_synt_i == 'F115W'): 
+		filter_response = ascii.read(filter_path + 'JWST_NIRCam.F115W.dat')
+	elif (fil_phot_synt_i == 'Lp_MKO'): 
+		filter_response = ascii.read(filter_path + 'MKO_NSFCam.Lp.dat')
+	elif (fil_phot_synt_i == 'Mp_MKO'): 
+		filter_response = ascii.read(filter_path + 'MKO_NSFCam.Mp.dat')
 	else:
 		print("Filter " + fil_phot_synt_i + " not included")
+
+	wave_col, flux_col = filter_response.colnames
+	wave_first = filter_response[wave_col][0] - 0.001
+	wave_last = filter_response[wave_col][-1] + 0.001
+
+	filter_response.insert_row(0, [wave_first, 0])
+	filter_response.add_row([wave_last, 0])
 
 	return filter_response
 
 def calculate_synt_phot(fil_phot_synt, wl_spectrum, flux_spectrum, eflux_spectrum, 
-	                    filter_path = '/Users/rociokiman/Hunter College Dropbox/Rocio Kiman/papers/_Published/Coconuts2/Data/Filters/'):
-	'''
-	Filters available: 'J', 'H', 'K', 'F1000W', 'F1280W', 'F1800W'
-
-	INPUT:
-	fil_phot_synt: list of strings. Filter to obtain the synthetic photometry (NOT FULL COVERAGE OF THE J FILTER)
-
-	OUTPUT:
-	phot_synt_mag: array, synthetic magnitude 
-	ephot_synt_mag: array, error synthetic magnitude 
-	phot_synt: array, synthetic flux in erg/s/cm2/A
-	ephot_synt: array, synthetic error flux in erg/s/cm2/A
-	
-	'''
+	                    filter_path):
 
 	# synthetic photometry
-	phot_synt = np.zeros(len(fil_phot_synt)) # array to save the synthetic photometry in erg/s/cm2/A
-	ephot_synt = np.zeros(len(fil_phot_synt)) # array to save the errors of the synthetic photometry in erg/s/cm2/A
-	phot_synt_mag = np.zeros(len(fil_phot_synt)) # array to save the synthetic photometry in mag
-	ephot_synt_mag = np.zeros(len(fil_phot_synt)) # array to save the synthetic photometry in mag
-	lambda_eff = np.zeros(len(fil_phot_synt)) # to save the effective wavelength of each filter
-	width_eff = np.zeros(len(fil_phot_synt)) # to save the effective width of each filter
+	phot_synt = np.zeros(len(fil_phot_synt)) 
+	ephot_synt = np.zeros(len(fil_phot_synt)) 
+	phot_synt_mag = np.zeros(len(fil_phot_synt)) 
+	ephot_synt_mag = np.zeros(len(fil_phot_synt)) 
+	lambda_eff = np.zeros(len(fil_phot_synt)) 
+	width_eff = np.zeros(len(fil_phot_synt)) 
 
 	for i in range(len(fil_phot_synt)):
 		try:
@@ -190,21 +230,20 @@ def calculate_synt_phot(fil_phot_synt, wl_spectrum, flux_spectrum, eflux_spectru
 		    
 		    # synthetic photometry for each filter
 		    # interpolate the filter response to the wavelength points of the spectrum
-		    #flux_spectrum_filter_response = np.interp(wl_spectrum_filter_response, filter_response_wl, filter_response_flux) 
 		    # filter response for the wavelength resolution of the spectrum spectra (erg/s/cm2/A)
 			filter_response_flux_int = np.interp(wl_spectrum_filter_response, filter_response_wl, filter_response_flux) # filter response for the wavelength resolution of the spectrum spectra (erg/s/cm2/A)
-		    
+			
 		    # normalize the response curve (it was dimensionless but now it has 1/um units)
-			filter_response_flux_int_norm = filter_response_flux_int / sum(filter_response_flux_int*wl_dis_spectrum_filter_response) # 1/um
-		    
+			filter_response_flux_int_norm = (filter_response_flux_int * wl_spectrum_filter_response) / sum(filter_response_flux_int * wl_spectrum_filter_response * wl_dis_spectrum_filter_response) # 1/um
+		
 		    # synthetic flux density
 			phot_synt[i] = sum(flux_spectrum_filter_response*filter_response_flux_int_norm*wl_dis_spectrum_filter_response) # erg/s/cm2/A
-			ephot_synt[i] = np.median(eflux_spectrum_filter_response/flux_spectrum_filter_response) * phot_synt[i] # keep median fractional flux uncertainties in the filter passband
+			ephot_synt[i] = np.sqrt(sum((eflux_spectrum_filter_response * filter_response_flux_int_norm * wl_dis_spectrum_filter_response)**2))
 		    
 		    # compute the effective wavelength and effective width of each filter
-			lambda_eff[i] = sum(wl_spectrum_filter_response*filter_response_flux_int*flux_spectrum_filter_response*wl_dis_spectrum_filter_response) / sum(filter_response_flux_int*flux_spectrum_filter_response*wl_dis_spectrum_filter_response) # um
+			lambda_eff[i] = sum(wl_spectrum_filter_response**2*filter_response_flux_int*flux_spectrum_filter_response*wl_dis_spectrum_filter_response) / sum(wl_spectrum_filter_response*filter_response_flux_int*flux_spectrum_filter_response*wl_dis_spectrum_filter_response) # um
 			width_eff[i] = sum(filter_response_flux_int*wl_dis_spectrum_filter_response) / filter_response_flux_int.max() # um
-		    
+
 		    # convert flux (in erg/s/cm2/A) to magnitudes
 		    # first from erg/s/cm2/A to Jy
 		    #phot_synt_Jy = phot_synt[i]*(lambda_eff[i]*1e-4)**2 / 3e-21 # Jy
@@ -227,25 +266,14 @@ def calculate_synt_phot(fil_phot_synt, wl_spectrum, flux_spectrum, eflux_spectru
 	return lambda_eff, width_eff, phot_synt_mag, ephot_synt_mag, phot_synt, ephot_synt
 
 
-def renormalize_spectrum(fil_phot_synt, phot_measurement, phot_err_measurement, wl_spectrum, flux_spectrum, eflux_spectrum,
-	                     filter_path = '/Users/rociokiman/Hunter College Dropbox/Rocio Kiman/papers/_Published/Coconuts2/Data/Filters/'):
-	'''
-	Filters available: 'J', 'H', 'K', 'F1000W', 'F1280W', 'F1800W'
-
-	INPUT:
-	fil_phot_synt: list of strings. Filter to obtain the synthetic photometry (NOT FULL COVERAGE OF THE J FILTER)
-	phot_measurement: list of photometry measurements to use to renormilize
-	phot_err_measurement: list of photometry error measurements to use to renormilize
-
-	OUTPUT:
-	
-	'''
+def renormalize_spectrum(fil_phot_synt, phot_measurement, phot_err_measurement, 
+						 wl_spectrum, flux_spectrum, eflux_spectrum,
+	                     filter_path):
 
 	twoMASS_erg = np.zeros(len(fil_phot_synt)) # to store the 2MASS photometry in erg/s/cm2/A
 	etwoMASS_erg = np.zeros(len(fil_phot_synt)) # to store the 2MASS photometry in erg/s/cm2/A
 
 	res = np.zeros(len(fil_phot_synt))
-	eres = np.zeros(len(fil_phot_synt))
 
 	lambda_eff, width_eff, phot_synt_mag, ephot_synt_mag, phot_synt, ephot_synt = calculate_synt_phot(fil_phot_synt, wl_spectrum, flux_spectrum, eflux_spectrum, filter_path)
 	
@@ -256,7 +284,7 @@ def renormalize_spectrum(fil_phot_synt, phot_measurement, phot_err_measurement, 
 		# 2MASS photometry in erg/s/cm2/A
 		# first from mag to Jy
 		twoMASS_Jy = phot_F0 * 10**(phot_measurement[i]/(-2.5))
-		etwoMASS_Jy = 10**(-phot_measurement[i]//2.5)*np.sqrt(ephot_F0**2+((-1*np.log(10)/2.5)*phot_F0*phot_err_measurement[i])**2)
+		etwoMASS_Jy = 10**(-phot_measurement[i]/2.5)*np.sqrt(ephot_F0**2+((-1*np.log(10)/2.5)*phot_F0*phot_err_measurement[i])**2)
 
 		# from Jy to erg/s/cm2/A
 		twoMASS_erg[i] = twoMASS_Jy / (3.33564095e+04*(lambda_eff[i]*1e4)**2)
@@ -264,7 +292,6 @@ def renormalize_spectrum(fil_phot_synt, phot_measurement, phot_err_measurement, 
 
 		# residual between the observed magnitudes and the synthetic ones
 		res[i] = phot_measurement[i] - phot_synt_mag[i]
-		eres[i] = np.sqrt(phot_err_measurement[i]**2 + ephot_synt_mag[i]**2)
 	    
 
 	# mean residuals
@@ -272,8 +299,6 @@ def renormalize_spectrum(fil_phot_synt, phot_measurement, phot_err_measurement, 
 
 	# scaling that must be applied to the spectrum
 	scaling = 10**(-res_JHK/2.5)
-
-	#print('scaling applied to the spectrum to be in erg/s/cm2/A: '+str(scaling)) 
 
 	return scaling, lambda_eff, width_eff, phot_synt_mag, ephot_synt_mag, phot_synt, ephot_synt, twoMASS_erg, etwoMASS_erg
 
