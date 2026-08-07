@@ -1,16 +1,4 @@
 
-# Interactive manual point removal tool.
-#
-# Requires an interactive matplotlib backend - in Jupyter/VSCode run
-# one of these in its own cell before calling the function:
-#   %matplotlib widget      (ipympl - works inline in the notebook)
-#   %matplotlib qt          (pops out a separate window)
-# The inline backend ("%matplotlib inline") does NOT support clicking.
-#
-# Also assumes `jy_to_erg_s_cm2_AA` and `renormalize_spectrum` are
-# already defined/imported in the notebook (as in the rest of this
-# project) - they're used to pick the best flux percentile for each
-# object, the same way as in the standalone best_perc-selection script.
 
 import os
 import numpy as np
@@ -22,11 +10,6 @@ from astropy.stats import sigma_clipped_stats
 from .extras import *
 from .flux_renormalize import *
 
-# Keys we use ('n', 'u', 's', 'q') collide with matplotlib's default
-# keyboard shortcuts - notably 's' opens a "save figure" dialog and 'q'
-# closes the window - so both our handler and the built-in one fire on
-# the same keypress. Disabling these default keymaps for the duration
-# of the tool (restored afterwards) avoids that.
 _KEYMAPS_TO_CLEAR = [
     'keymap.save', 'keymap.quit', 'keymap.quit_all', 'keymap.fullscreen',
     'keymap.grid', 'keymap.grid_minor', 'keymap.yscale', 'keymap.xscale',
@@ -102,37 +85,6 @@ def _pick_best_perc(spectrum, wave_full, perc_options, phot_measurement, phot_er
 def clean_spectra_interactively(spectra, idx, known_data, output_dir='spectra/clean', pick_radius=10,
                                  perc_options=(0.9, 0.95, 0.98), fil_phot_synt=None, filter_path=None):
     """
-    Loop through `spectra` one at a time, click to mark bad points, and
-    save a cleaned version of each into `output_dir`.
-
-    Unlike an earlier version of this tool, the flux percentile to save
-    is NOT passed in - it's chosen automatically. For each object, a
-    percentile is first picked from the raw spectrum (same method as
-    the standalone best_perc script) just to decide what to display for
-    point-picking. After you finish marking bad points but before
-    saving, the percentile choice is redone using the cleaned spectrum
-    (points you removed are excluded from the comparison), since
-    removing bad points can change which percentile's photometry best
-    matches the literature values. That final choice is what gets saved.
-
-    The saved file keeps only 'Wave' plus the winning percentile's
-    columns from each '<prefix>_<perc>' family (Flux, Fluxerr,
-    r_aperture, r_in, r_out - see PERC_COLUMN_PREFIXES), with every
-    other percentile's version of those columns dropped, and the
-    survivors renamed to drop the _<perc> suffix (e.g. 'Flux_0.95' ->
-    'Flux'). Rows are dropped if their flux is NaN/non-positive for the
-    chosen percentile, or if you marked them for removal. The FITS
-    header's PERC keyword (which lists all the percentile options in
-    the raw spectrum) is overwritten with just the one selected.
-
-    If a cleaned version of a spectrum already exists in `output_dir`
-    (same filename), it's loaded and used to pre-mark the points that
-    were removed last time, so you're resuming rather than starting
-    over. Points are colored to show this at a glance: green for a
-    spectrum that already has a saved clean version (points still
-    kept, i.e. not previously removed), orange for a spectrum that has
-    never been cleaned before. Previously/currently removed points
-    always show as a red x, either way.
 
     Controls, while a spectrum's window is open:
       left-click near a point   toggle that point for removal (shows a red x)
@@ -214,15 +166,7 @@ def _clean_loop(spectra, idx, known_data, output_dir, pick_radius, perc_options,
     perc_options = list(perc_options)
     phot_results = {'data_phot': [], 'data_phot_err': [], 'syn_phot': [], 'syn_phot_err': [], 'best_perc': []}
 
-    # One window for the whole run, reused across every spectrum (only
-    # its contents are cleared/redrawn each iteration). Creating and
-    # destroying a new Tk/Qt window on every iteration is what caused
-    # the tool to hang after the last spectrum; a single long-lived
-    # window avoids that, and plt.show(block=False) + plt.pause() is
-    # what actually waits for you in Jupyter/IPython - a plain
-    # plt.show() is non-blocking there regardless of its `block` value,
-    # since IPython manages the GUI event loop itself (that's what
-    # caused every window to pop up at once instead of waiting).
+
     fig, ax = plt.subplots(figsize=(10, 5))
     plt.show(block=False)
 
@@ -425,6 +369,4 @@ def _clean_loop(spectra, idx, known_data, output_dir, pick_radius, perc_options,
 # phot = clean_spectra_interactively(spectra, idx, known_data, output_dir='spectra/clean')
 # data_phot, syn_phot = phot['data_phot'], phot['syn_phot']
 # best_perc = phot['best_perc']
-# # ... or, to reproduce the comparison figure yourself:
-# # fig, axs = plot_photometry_comparison(fil_phot_synt, phot['data_phot'], phot['data_phot_err'],
-# #                                        phot['syn_phot'], phot['syn_phot_err'])
+
