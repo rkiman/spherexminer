@@ -1,5 +1,4 @@
 
-
 import os
 import numpy as np
 import matplotlib as mpl
@@ -10,6 +9,11 @@ from astropy.stats import sigma_clipped_stats
 from .extras import *
 from .flux_renormalize import *
 
+# Keys we use ('n', 'u', 'a', 's', 'q') collide with matplotlib's default
+# keyboard shortcuts - notably 's' opens a "save figure" dialog and 'q'
+# closes the window - so both our handler and the built-in one fire on
+# the same keypress. Disabling these default keymaps for the duration
+# of the tool (restored afterwards) avoids that.
 _KEYMAPS_TO_CLEAR = [
     'keymap.save', 'keymap.quit', 'keymap.quit_all', 'keymap.fullscreen',
     'keymap.grid', 'keymap.grid_minor', 'keymap.yscale', 'keymap.xscale',
@@ -17,7 +21,7 @@ _KEYMAPS_TO_CLEAR = [
     'keymap.zoom', 'keymap.help', 'keymap.all_axes',
 ]
 
-DEFAULT_FIL_PHOT_SYNT = ['J_2MASS', 'H_2MASS', 'K_2MASS', 'W1', 'I1','I2','Lp_MKO','Mp_MKO']
+DEFAULT_FIL_PHOT_SYNT = ['J_2MASS', 'H_2MASS', 'K_2MASS', 'W1', 'I1', 'I2', 'Lp_MKO', 'Mp_MKO']
 DEFAULT_FILTER_PATH = '/Users/rociokiman/Hunter College Dropbox/Rocio Kiman/papers/_Published/Coconuts2/Data/Filters/'
 
 # every column that follows the '<prefix>_<perc>' naming convention -
@@ -25,6 +29,11 @@ DEFAULT_FILTER_PATH = '/Users/rociokiman/Hunter College Dropbox/Rocio Kiman/pape
 # of these columns get dropped, and the chosen one gets renamed to
 # just '<prefix>' (suffix removed)
 PERC_COLUMN_PREFIXES = ('Flux', 'Fluxerr', 'r_aperture', 'r_in', 'r_out')
+
+# Safety cap on how many times we'll redisplay-and-recheck the best
+# percentile for a single spectrum before just saving with whatever it
+# last settled on (guards against pathological flip-flopping).
+MAX_REDISPLAYS = 5
 
 
 def _synth_phot(spectrum, wave_full, perc, phot_measurement, phot_err_measurement,
@@ -81,18 +90,17 @@ def _pick_best_perc(spectrum, wave_full, perc_options, phot_measurement, phot_er
     return perc_best, mag_best, emag_best
 
 
-
 def clean_spectra_interactively(spectra, idx, known_data, output_dir='spectra/clean', pick_radius=10,
                                  perc_options=(0.9, 0.95, 0.98), fil_phot_synt=None, filter_path=None):
     """
 
     Controls, while a spectrum's window is open:
       left-click near a point   toggle that point for removal (shows a red x)
-      'n'                       save the cleaned spectrum and move to the next one
-      'u'                       undo - go back to the state when the window opened
+      'n'                       save (or, if the best percentile changed, redisplay for review)
+      'u'                       undo - go back to the state when this round's window opened
+      'a'                       clear all removals (keep every point) - restart selection from scratch
       's'                       skip this spectrum (nothing saved) and move on
       'q'                       stop the whole loop
-      'a'                       clear all removals (keep every point) - restart selection from scratch
 
     Parameters
     ----------
@@ -121,13 +129,7 @@ def clean_spectra_interactively(spectra, idx, known_data, output_dir='spectra/cl
     Returns
     -------
     dict with keys 'data_phot', 'data_phot_err', 'syn_phot',
-    'syn_phot_err' (each an array of shape (n_saved, len(fil_phot_synt)),
-    in the same filter order as fil_phot_synt) and 'best_perc' (a 1D
-    array of length n_saved, the percentile actually used for each
-    spectrum). One row per spectrum you saved this run (skipped ones
-    aren't included). Feed the photometry arrays into
-    plot_photometry_comparison(fil_phot_synt, ...) yourself, or plot
-    them however you like.
+    'syn_phot_err' 
     """
     os.makedirs(output_dir, exist_ok=True)
     if fil_phot_synt is None:
@@ -135,8 +137,7 @@ def clean_spectra_interactively(spectra, idx, known_data, output_dir='spectra/cl
     if filter_path is None:
         filter_path = DEFAULT_FILTER_PATH
 
-    # some keymap.* rcParams have been removed across matplotlib versions
-    # (e.g. keymap.all_axes) - only touch the ones that actually exist
+
     keys_present = [k for k in _KEYMAPS_TO_CLEAR if k in mpl.rcParams]
     old_keymaps = {k: list(mpl.rcParams[k]) for k in keys_present}
     for k in keys_present:
@@ -166,9 +167,10 @@ def _clean_loop(spectra, idx, known_data, output_dir, pick_radius, perc_options,
     perc_options = list(perc_options)
     phot_results = {'data_phot': [], 'data_phot_err': [], 'syn_phot': [], 'syn_phot_err': [], 'best_perc': []}
 
-
     fig, ax = plt.subplots(figsize=(10, 5))
     plt.show(block=False)
+
+    quit_all = False
 
     try:
         for i, spectrum_path in enumerate(spectra):
@@ -181,182 +183,225 @@ def _clean_loop(spectra, idx, known_data, output_dir, pick_radius, perc_options,
 
             no_exclusions = np.zeros(len(spectrum), dtype=bool)
 
-            # pick a percentile to DISPLAY, based on the raw (uncleaned) spectrum
-            perc_display, _, _ = _pick_best_perc(spectrum, wave_full, perc_options, phot_measurement,
-                                                  phot_err_measurement, no_exclusions, fil_phot_synt, filter_path)
-            col_flux = 'Flux_' + str(perc_display)
-            col_fluxerr = 'Fluxerr_' + str(perc_display)
-
-            flux_full = np.array(spectrum[col_flux])
-            fluxerr_full = np.array(spectrum[col_fluxerr])
-
-            valid = np.array([True if x > 0 and str(x) != 'nan' else False for x in flux_full])
-            valid_idx = np.where(valid)[0]
-            wave = wave_full[valid_idx]
-            flux = flux_full[valid_idx]
-            fluxerr = fluxerr_full[valid_idx]
-
             # check for a previously-saved clean version of this spectrum
             out_path = os.path.join(output_dir, os.path.basename(spectrum_path))
             already_cleaned = os.path.exists(out_path)
 
-            removed = np.zeros(len(valid_idx), dtype=bool)  # aligned with valid_idx / wave / flux
+
+            reused_saved_perc = False
             if already_cleaned:
                 clean_table = Table.read(out_path)
-                # a row was removed previously if its wavelength no longer
-                # appears in the saved clean spectrum
-                removed_full_mask = ~np.isin(wave_full, np.array(clean_table['Wave']))
-                removed = removed_full_mask[valid_idx]
+                removed_wave_set = set(
+                    wave_full[~np.isin(wave_full, np.array(clean_table['Wave']))].tolist())
+                if 'PERC' in clean_table.meta:
+                    perc_saved = clean_table.meta['PERC']
 
-            point_color = 'tab:green' if already_cleaned else 'tab:orange'
-
-            ax.clear()
-            ax.errorbar(wave, flux, yerr=fluxerr, fmt='none', ecolor='lightgray', zorder=0)
-            ax.plot(wave, flux, 'o', color=point_color, markersize=4, zorder=1)
-            marks_bad, = ax.plot([], [], 'x', color='red', markersize=9, markeredgewidth=2, zorder=5)
-            ax.set_xlabel(r'Wavelength ($\mu$m)')
-            ax.set_ylabel(r'Flux ($\mu$Jy)')
-            status = (f"clean version exists ({removed.sum()} pt(s) previously removed) - green = kept"
-                      if already_cleaned else "new spectrum, never cleaned - orange = untouched")
-            ax.set_title(f"{os.path.basename(spectrum_path)}   [{i+1}/{len(spectra)}]   perc={perc_display}   {status}\n"
-                        "click=toggle point, n=save+next, u=undo, a=keep all (restart), s=skip, q=quit")
-            print(f"[{i+1}/{len(spectra)}] {os.path.basename(spectrum_path)}: displaying perc={perc_display}. "
-                  + (f"Existing clean spectrum found, {removed.sum()} point(s) previously removed."
-                     if already_cleaned else "No existing clean spectrum - starting fresh."))
-
-            baseline_removed = removed.copy()  # what 'u' undoes back to
-            if already_cleaned:
-                marks_bad.set_data(wave_full[valid_idx[removed]], flux_full[valid_idx[removed]])
-
-            state = {'done': False, 'action': None}
-
-            def redraw():
-                bad = valid_idx[removed]
-                marks_bad.set_data(wave_full[bad], flux_full[bad])
-                fig.canvas.draw_idle()
-
-            def on_click(event):
-                if event.inaxes != ax or event.xdata is None or event.ydata is None:
-                    return
-                disp = ax.transData.transform(np.column_stack([wave, flux]))
-                click_disp = ax.transData.transform((event.xdata, event.ydata))
-                dist = np.hypot(disp[:, 0] - click_disp[0], disp[:, 1] - click_disp[1])
-                j = np.argmin(dist)
-                if dist[j] < pick_radius:
-                    removed[j] = not removed[j]
-                    redraw()
-
-            def on_key(event):
-                if event.key == 'n':
-                    state['action'] = 'save'
-                elif event.key == 'u':
-                    removed[:] = baseline_removed.copy()
-                    redraw()
-                    return
-                elif event.key == 'a':
-                    removed[:] = False
-                    redraw()
-                    return
-                elif event.key == 's':
-                    state['action'] = 'skip'
-                elif event.key == 'q':
-                    state['action'] = 'quit'
+                    perc_display = next((p for p in perc_options if float(p) == float(perc_saved)), perc_saved)
+                    reused_saved_perc = True
                 else:
-                    return
-                state['done'] = True
+                    perc_display, _, _ = _pick_best_perc(spectrum, wave_full, perc_options, phot_measurement,
+                                                          phot_err_measurement, no_exclusions, fil_phot_synt, filter_path)
+            else:
+                removed_wave_set = set()
+                perc_display, _, _ = _pick_best_perc(spectrum, wave_full, perc_options, phot_measurement,
+                                                      phot_err_measurement, no_exclusions, fil_phot_synt, filter_path)
 
-            def on_close(event):
-                # window closed via the OS close button rather than a key
-                if not state['done']:
-                    state['action'] = 'quit'
+            skip_this = False
+            saved_this_spectrum = False
+            redisplay_round = 0
+
+
+            while not saved_this_spectrum and not skip_this and not quit_all:
+                col_flux = 'Flux_' + str(perc_display)
+                col_fluxerr = 'Fluxerr_' + str(perc_display)
+
+                flux_full = np.array(spectrum[col_flux])
+                fluxerr_full = np.array(spectrum[col_fluxerr])
+
+                valid = np.array([True if x > 0 and str(x) != 'nan' else False for x in flux_full])
+                valid_idx = np.where(valid)[0]
+                wave = wave_full[valid_idx]
+                flux = flux_full[valid_idx]
+                fluxerr = fluxerr_full[valid_idx]
+
+                removed = np.isin(wave, list(removed_wave_set))
+
+                point_color = 'tab:green' if already_cleaned else 'tab:orange'
+
+                ax.clear()
+                ax.errorbar(wave, flux, yerr=fluxerr, fmt='none', ecolor='lightgray', zorder=0)
+                ax.plot(wave, flux, 'o', color=point_color, markersize=4, zorder=1)
+                marks_bad, = ax.plot([], [], 'x', color='red', markersize=9, markeredgewidth=2, zorder=5)
+                ax.set_xlabel(r'Wavelength ($\mu$m)')
+                ax.set_ylabel(r'Flux ($\mu$Jy)')
+
+                round_tag = f"   [review round {redisplay_round + 1}]" if redisplay_round > 0 else ""
+                status = (f"{removed.sum()} pt(s) currently marked removed"
+                          if (already_cleaned or redisplay_round > 0) else "new spectrum, never cleaned")
+                ax.set_title(f"{os.path.basename(spectrum_path)}   [{i+1}/{len(spectra)}]   perc={perc_display}   "
+                            f"{status}{round_tag}\n"
+                            "click=toggle point, n=save+next, u=undo, a=keep all (restart), s=skip, q=quit")
+
+                print(f"[{i+1}/{len(spectra)}] {os.path.basename(spectrum_path)}: displaying perc={perc_display}"
+                      + (" (matching saved clean version)" if reused_saved_perc and redisplay_round == 0 else "")
+                      + (f", review round {redisplay_round + 1}" if redisplay_round > 0 else "")
+                      + f". {removed.sum()} point(s) currently marked removed.")
+
+                baseline_removed = removed.copy()  # what 'u' undoes back to (start of this round)
+                if removed.any():
+                    marks_bad.set_data(wave[removed], flux[removed])
+
+                state = {'done': False, 'action': None}
+
+                def redraw():
+                    marks_bad.set_data(wave[removed], flux[removed])
+                    fig.canvas.draw_idle()
+
+                def on_click(event):
+                    if event.inaxes != ax or event.xdata is None or event.ydata is None:
+                        return
+                    disp = ax.transData.transform(np.column_stack([wave, flux]))
+                    click_disp = ax.transData.transform((event.xdata, event.ydata))
+                    dist = np.hypot(disp[:, 0] - click_disp[0], disp[:, 1] - click_disp[1])
+                    j = np.argmin(dist)
+                    if dist[j] < pick_radius:
+                        removed[j] = not removed[j]
+                        redraw()
+
+                def on_key(event):
+                    if event.key == 'n':
+                        state['action'] = 'save'
+                    elif event.key == 'u':
+                        removed[:] = baseline_removed.copy()
+                        redraw()
+                        return
+                    elif event.key == 'a':
+                        removed[:] = False
+                        redraw()
+                        return
+                    elif event.key == 's':
+                        state['action'] = 'skip'
+                    elif event.key == 'q':
+                        state['action'] = 'quit'
+                    else:
+                        return
                     state['done'] = True
 
-            cid_click = fig.canvas.mpl_connect('button_press_event', on_click)
-            cid_key = fig.canvas.mpl_connect('key_press_event', on_key)
-            cid_close = fig.canvas.mpl_connect('close_event', on_close)
+                def on_close(event):
+                    # window closed via the OS close button rather than a key
+                    if not state['done']:
+                        state['action'] = 'quit'
+                        state['done'] = True
 
-            fig.canvas.draw_idle()
-            while not state['done']:
-                if not plt.fignum_exists(fig.number):
-                    state['action'] = 'quit'
-                    state['done'] = True
+                cid_click = fig.canvas.mpl_connect('button_press_event', on_click)
+                cid_key = fig.canvas.mpl_connect('key_press_event', on_key)
+                cid_close = fig.canvas.mpl_connect('close_event', on_close)
+
+                fig.canvas.draw_idle()
+                while not state['done']:
+                    if not plt.fignum_exists(fig.number):
+                        state['action'] = 'quit'
+                        state['done'] = True
+                        break
+                    plt.pause(0.05)
+
+                for cid in (cid_click, cid_key, cid_close):
+                    try:
+                        fig.canvas.mpl_disconnect(cid)
+                    except Exception:
+                        pass
+
+                if state['action'] == 'quit':
+                    quit_all = True
                     break
-                plt.pause(0.05)
 
-            for cid in (cid_click, cid_key, cid_close):
-                try:
-                    fig.canvas.mpl_disconnect(cid)
-                except Exception:
-                    pass
+                if state['action'] == 'skip':
+                    skip_this = True
+                    break
 
-            if state['action'] == 'quit':
+                # 'save' pressed - lock in this round's removals (by
+                # wavelength) and check whether the best percentile for the
+                # resulting cleaned spectrum still matches what's displayed
+                removed_wave_set = set(wave[removed].tolist())
+                manually_removed_mask = np.isin(wave_full, list(removed_wave_set))
+
+                perc_best, phot_synt_mag, ephot_synt_mag = _pick_best_perc(
+                    spectrum, wave_full, perc_options, phot_measurement, phot_err_measurement,
+                    manually_removed_mask, fil_phot_synt, filter_path)
+
+                if perc_best != perc_display and redisplay_round < MAX_REDISPLAYS:
+                    print(f"  best percentile for this cleaned selection is {perc_best}, not the displayed "
+                          f"{perc_display} - redisplaying at {perc_best} so you can review it before saving.")
+                    perc_display = perc_best
+                    redisplay_round += 1
+                    continue
+
+                if perc_best != perc_display:
+                    print(f"  percentile did not stabilize after {MAX_REDISPLAYS} review rounds "
+                          f"(last recomputed value: {perc_best}) - saving with {perc_best} without further review.")
+                    perc_display = perc_best
+
+                # --- percentile is stable: perc_display is exactly what
+                # was reviewed AND what's about to be saved ---
+                if phot_synt_mag is not None:
+                    for fil, syn, lit in zip(fil_phot_synt, phot_synt_mag, phot_measurement):
+                        print(f"    {fil}: synthetic={syn:.3f}  literature={lit:.3f}")
+
+                col_flux_best = 'Flux_' + str(perc_display)
+                col_fluxerr_best = 'Fluxerr_' + str(perc_display)
+                flux_best_full = np.array(spectrum[col_flux_best])
+                valid_best = np.array([True if x > 0 and str(x) != 'nan' else False for x in flux_best_full])
+
+                # rows: valid for the chosen percentile, and not marked for removal
+                keep_mask = valid_best & (~manually_removed_mask)
+
+                cleaned = spectrum[keep_mask]
+
+                # columns: for every '<prefix>_<perc>' family (Flux, Fluxerr,
+                # r_aperture, r_in, r_out, ...), drop every percentile except
+                # the chosen one, and rename the survivor so the _<perc>
+                # suffix is gone
+                best_col_names = {f'{prefix}_{perc_display}': prefix for prefix in PERC_COLUMN_PREFIXES}
+                other_perc_cols = {
+                    f'{prefix}_{p}' for p in perc_options for prefix in PERC_COLUMN_PREFIXES
+                } - set(best_col_names)
+                cols_to_drop = [c for c in other_perc_cols if c in cleaned.colnames]
+                if cols_to_drop:
+                    cleaned.remove_columns(cols_to_drop)
+                for old_name, new_name in best_col_names.items():
+                    if old_name in cleaned.colnames:
+                        cleaned.rename_column(old_name, new_name)
+
+                # header: PERC currently lists all the percentile options -
+                # overwrite it with just the one actually selected
+                cleaned.meta['PERC'] = perc_display
+
+                cleaned.write(out_path, format='fits', overwrite=True)
+                n_removed_clicks = int(manually_removed_mask.sum())
+                n_nan_dropped = int((~valid_best).sum())
+                print(f'Saved {out_path}  (perc={perc_display}, {n_removed_clicks} point(s) removed by hand, '
+                      f'{n_nan_dropped} NaN/invalid point(s) dropped)')
+
+                # stash this object's photometry for the final comparison figure
+                phot_results['data_phot'].append(phot_measurement)
+                phot_results['data_phot_err'].append(phot_err_measurement)
+                if phot_synt_mag is not None:
+                    phot_results['syn_phot'].append(phot_synt_mag)
+                    phot_results['syn_phot_err'].append(ephot_synt_mag)
+                else:
+                    nan_row = np.full(len(fil_phot_synt), np.nan)
+                    phot_results['syn_phot'].append(nan_row)
+                    phot_results['syn_phot_err'].append(nan_row)
+                phot_results['best_perc'].append(perc_display)
+
+                saved_this_spectrum = True
+
+            if quit_all:
                 print('Stopped early - nothing after this point was processed.')
                 break
-
-            if state['action'] == 'skip':
+            if skip_this:
                 print(f'Skipped (not saved): {spectrum_path}')
                 continue
-
-            # --- bad point selection is done: now pick the final percentile,
-            # using the cleaned spectrum (manually-removed rows excluded) ---
-            manually_removed_mask = np.zeros(len(spectrum), dtype=bool)
-            manually_removed_mask[valid_idx[removed]] = True
-
-            perc_best, phot_synt_mag, ephot_synt_mag = _pick_best_perc(
-                spectrum, wave_full, perc_options, phot_measurement, phot_err_measurement,
-                manually_removed_mask, fil_phot_synt, filter_path)
-
-            if perc_best != perc_display:
-                print(f"  best percentile changed after cleaning: {perc_display} -> {perc_best}")
-            if phot_synt_mag is not None:
-                for fil, syn, lit in zip(fil_phot_synt, phot_synt_mag, phot_measurement):
-                    print(f"    {fil}: synthetic={syn:.3f}  literature={lit:.3f}")
-
-            col_flux_best = 'Flux_' + str(perc_best)
-            col_fluxerr_best = 'Fluxerr_' + str(perc_best)
-            flux_best_full = np.array(spectrum[col_flux_best])
-            valid_best = np.array([True if x > 0 and str(x) != 'nan' else False for x in flux_best_full])
-
-            # rows: valid for the chosen percentile, and not marked for removal
-            keep_mask = valid_best & (~manually_removed_mask)
-
-            cleaned = spectrum[keep_mask]
-
-            # columns: for every '<prefix>_<perc>' family (Flux, Fluxerr,
-            # r_aperture, r_in, r_out, ...), drop every percentile except the
-            # chosen one, and rename the survivor so the _<perc> suffix is gone
-            best_col_names = {f'{prefix}_{perc_best}': prefix for prefix in PERC_COLUMN_PREFIXES}
-            other_perc_cols = {
-                f'{prefix}_{p}' for p in perc_options for prefix in PERC_COLUMN_PREFIXES
-            } - set(best_col_names)
-            cols_to_drop = [c for c in other_perc_cols if c in cleaned.colnames]
-            if cols_to_drop:
-                cleaned.remove_columns(cols_to_drop)
-            for old_name, new_name in best_col_names.items():
-                if old_name in cleaned.colnames:
-                    cleaned.rename_column(old_name, new_name)
-
-            # header: PERC currently lists all the percentile options -
-            # overwrite it with just the one actually selected
-            cleaned.meta['PERC'] = perc_best
-
-            cleaned.write(out_path, format='fits', overwrite=True)
-            n_removed_clicks = int(manually_removed_mask.sum())
-            n_nan_dropped = int((~valid_best).sum())
-            print(f'Saved {out_path}  (perc={perc_best}, {n_removed_clicks} point(s) removed by hand, '
-                  f'{n_nan_dropped} NaN/invalid point(s) dropped)')
-
-            # stash this object's photometry for the final comparison figure
-            phot_results['data_phot'].append(phot_measurement)
-            phot_results['data_phot_err'].append(phot_err_measurement)
-            if phot_synt_mag is not None:
-                phot_results['syn_phot'].append(phot_synt_mag)
-                phot_results['syn_phot_err'].append(ephot_synt_mag)
-            else:
-                nan_row = np.full(len(fil_phot_synt), np.nan)
-                phot_results['syn_phot'].append(nan_row)
-                phot_results['syn_phot_err'].append(nan_row)
-            phot_results['best_perc'].append(perc_best)
     finally:
         if plt.fignum_exists(fig.number):
             plt.close(fig)
@@ -369,4 +414,3 @@ def _clean_loop(spectra, idx, known_data, output_dir, pick_radius, perc_options,
 # phot = clean_spectra_interactively(spectra, idx, known_data, output_dir='spectra/clean')
 # data_phot, syn_phot = phot['data_phot'], phot['syn_phot']
 # best_perc = phot['best_perc']
-
