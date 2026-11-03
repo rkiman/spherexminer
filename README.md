@@ -17,6 +17,13 @@ Outputs:
 
 The pipeline lives in `src/pipeline.py`. 
 
+## Setup
+
+The code needs the official SPHEREx spectral channel definitions, `spectral_channels_spx_cal-sch-v1-2026-106.fits`, which must be downloaded from IRSA and placed in `src/`:
+
+- Download: https://irsa.ipac.caltech.edu/ibe/data/spherex
+- Description of the file: https://caltech-ipac.github.io/spherex-archive-documentation/spherex-data-products/
+
 ## Usage
 
 Run from the repository folder.
