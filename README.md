@@ -53,3 +53,56 @@ python main_large_sample.py Data/tables/my_targets.csv
 - The status of every object is saved in `Data/summary_large_sample.csv`.
 
 Other options (output paths, `OVERWRITE`, `DELETE_FIGURES`) are set at the top of each script.
+
+## Cleaning the spectra (in a Jupyter notebook)
+
+The `.fits` files from the main scripts are *raw*: they have every measurement (one per image/epoch) at all three apertures.
+`clean_sample_v2` (in `src/check_spectra.py`) turns them into clean spectra:
+
+- For each object it picks the aperture (90, 95 or 98%) whose synthetic photometry best matches the literature photometry.
+- It groups the points by SPHEREx channel, using the `CHANNEL` column of the raw spectrum (or the official channel definitions from the wavelength, for older extractions without it), and combines all epochs in each channel (weighted mean; the error is inflated if the epochs scatter more than their errors).
+- It shows an interactive window to flag extreme outliers by hand (`check_outliers=True`).
+
+Example adapted from `low-gravity-LTdwarfs/standards.ipynb`:
+
+```python
+import os, sys
+import numpy as np
+from astropy.table import Table
+
+sys.path.append('../spherexminer/')    # path to this repository
+from src import *
+
+# Table with Name and literature photometry (columns <filter> and <filter>_err)
+known_data = Table.read('../spherexminer/Data/tables/standards.csv')
+FILTER_PATH = '/path/to/Filters/'      # filter transmission curves
+
+# Raw spectra that exist
+spectra, idx = [], []
+for i, name in enumerate(known_data['Name']):
+    path = '../spherexminer/Data/spectra/Spherex_spec_' + name.replace(' ', '') + '.fits'
+    if os.path.exists(path):
+        spectra.append(path)
+        idx.append(i)
+
+# Literature photometry used to choose the aperture
+filters = ['J_2MASS', 'H_2MASS', 'K_2MASS', 'W1', 'I1', 'I2', 'Lp_MKO', 'Mp_MKO']
+lit = [literature_photometry(known_data, i, filters) for i in idx]
+lit_mag = np.array([x[0] for x in lit])
+lit_err = np.array([x[1] for x in lit])
+
+# Clean and save to data/spectra_v2/ (same file names)
+summary = clean_sample_v2(spectra, 'data/spectra_v2/', perc='literature',
+                          phot_measurements=lit_mag, phot_err_measurements=lit_err,
+                          fil_phot_synt=filters, filter_path=FILTER_PATH,
+                          error_method='birge', overwrite=True)
+
+# Read one clean spectrum: one point per SPHEREx channel
+spec = Table.read('data/spectra_v2/' + os.path.basename(spectra[0]))
+spec['Wave', 'Flux', 'Fluxerr', 'Bandwidth', 'Npoints']
+```
+
+Options:
+
+- To use a single aperture for everyone, set `perc=0.95` (no photometry needed).
+- To also drop points you removed by hand in an earlier version, add `reference_dir='data/spectra_v1/'`.
