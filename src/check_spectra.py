@@ -419,6 +419,7 @@ def _clean_loop(spectra, idx, known_data, output_dir, pick_radius, perc_options,
 # v2 cleaning: multi-epoch points combined per official SPHEREx channel, merged from spherex_spectra_v2.py.
 DEFAULT_PERC = 0.95                      # used when the aperture cannot be selected
 PERC_OPTIONS = (0.9, 0.95, 0.98)         # apertures available in the raw extractions
+CHANNEL_COLUMN = 'CHANNEL'              # channel id (100*DETECTOR + SUBCHAN) written by the extraction
 DEFAULT_SELECTION_FILTERS = ['J_2MASS', 'H_2MASS', 'K_2MASS', 'W1', 'I1', 'Lp_MKO', 'Mp_MKO']
 
 
@@ -437,8 +438,34 @@ def select_aperture(raw, perc=DEFAULT_PERC):
     names = ['Wave'] + [prefix for prefix in PERC_COLUMN_PREFIXES if prefix + '_' + p in raw.colnames]
     t = Table([np.array(c) for c in cols], names=names, meta=dict(raw.meta))
     t['OBSMJD'] = np.array(raw['OBSMJD'])
+    # Channel measured at extraction (newer extractions); used to group the points per channel.
+    if CHANNEL_COLUMN in raw.colnames:
+        t[CHANNEL_COLUMN] = np.array(raw[CHANNEL_COLUMN])
     t.meta['PERC'] = float(perc)
     return t
+
+
+def assign_channels(points, channel_table=None):
+    """
+    Row of the channel table for each measurement.
+
+    If the points have the CHANNEL column written by the spectrum extraction
+    (100*DETECTOR + SUBCHAN, from the pixel CHANNEL_MAP), each point is combined with the
+    other epochs in that same channel. Spectra without the column (older extractions), and
+    points with an invalid channel (e.g. -1, masked), are assigned from the wavelength only
+    (assign_spherex_channels).
+    """
+    ch = read_spherex_channels(channel_table)
+    wave = np.atleast_1d(np.asarray(points['Wave'], dtype=float))
+    row = assign_spherex_channels(wave, ch)
+    if CHANNEL_COLUMN not in points.colnames:
+        return row
+    lookup = {int(cid): i for i, cid in enumerate(channel_ids(ch))}
+    chan_pts = np.ma.filled(np.ma.asarray(points[CHANNEL_COLUMN]), -1).astype(int)
+    r = np.array([lookup.get(int(c), -1) for c in chan_pts], dtype=int)
+    ok = r >= 0
+    row[ok] = r[ok]
+    return row
 
 
 def in_reference(points, reference):
@@ -460,8 +487,8 @@ def combine_per_channel(points, channel_table=None, error_method='birge', clip_s
     mjd = np.asarray(points['OBSMJD'], dtype=float) if 'OBSMJD' in points.colnames else np.full(len(wave), np.nan)
 
     good = np.isfinite(wave) & np.isfinite(flux) & np.isfinite(err) & (err > 0)
+    row = assign_channels(points[good], ch)
     wave, flux, err, rap, mjd = wave[good], flux[good], err[good], rap[good], mjd[good]
-    row = assign_spherex_channels(wave, ch)
 
     det = np.asarray(ch['DETECTOR'], dtype=int)
     sub = np.asarray(ch['SUBCHAN'], dtype=int)
@@ -877,7 +904,7 @@ def clean_spectrum_v2(raw, perc=DEFAULT_PERC, reference_clean=None, channel_tabl
 
     points = points[valid]
     spec = combine_per_channel(points, channel_table, error_method=error_method, clip_sigma=clip_sigma)
-    points['Channel'] = channel_ids(channel_table)[assign_spherex_channels(points['Wave'], channel_table)]
+    points['Channel'] = channel_ids(channel_table)[assign_channels(points, channel_table)]
 
     meta = {}
     for key in ['NAME', 'RA', 'DEC', 'PMRA', 'PMDEC', 'EPOCH']:
@@ -892,6 +919,7 @@ def clean_spectrum_v2(raw, perc=DEFAULT_PERC, reference_clean=None, channel_tabl
         'ERRMETH': error_method,
         'CLIPSIG': -1.0 if clip_sigma is None else float(clip_sigma),
         'CHANFILE': os.path.basename(ch_file) if channel_table is None or isinstance(channel_table, str) else 'user table',
+        'CHANSRC': 'channel' if CHANNEL_COLUMN in points.colnames else 'wavelength',
         'NCHAN': len(spec),
         'NMEAS': int(np.sum(spec['Npoints'])),
         'NRAW': n_raw,
@@ -919,6 +947,8 @@ def clean_spectrum_v2(raw, perc=DEFAULT_PERC, reference_clean=None, channel_tabl
         'ERRMETH: birge = error of the weighted mean x sqrt(max(1, chi2_red))',
         'CLIPSIG: sigma-clipping threshold within each channel (-1 = none)',
         'CHANFILE: IRSA SPHEREx spectral channel definition file',
+        'CHANSRC: how points were grouped: channel = CHANNEL column of the raw spectrum;',
+        '  wavelength = channel assigned from the wavelength only (older extractions)',
         'NCHAN: number of channels with data; NMEAS: measurements combined',
         'NRAW: measurements in the raw extraction',
         'NINVALID: measurements dropped (NaN or flux <= 0)',
