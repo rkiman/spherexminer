@@ -302,3 +302,205 @@ def renormalize_spectrum(fil_phot_synt, phot_measurement, phot_err_measurement,
 
 	return scaling, lambda_eff, width_eff, phot_synt_mag, ephot_synt_mag, phot_synt, ephot_synt, twoMASS_erg, etwoMASS_erg
 
+
+# np.trapz was renamed np.trapezoid in numpy 2
+_trapezoid = getattr(np, 'trapezoid', None) or getattr(np, 'trapz')
+
+
+def load_vega_fnu(vega_path):
+	"""
+	Read a CALSPEC Vega spectrum (e.g. alpha_lyr_stis_011.fits; WAVELENGTH in A,
+	FLUX in erg/s/cm2/A) and return wavelength (um) and F_nu (Jy).
+	"""
+	from astropy.table import Table
+	vega = Table.read(vega_path)
+	wl_A = np.asarray(vega['WAVELENGTH'], dtype=float)
+	flam = np.asarray(vega['FLUX'], dtype=float)
+	fnu_jy = 3.33564095e+04 * flam * wl_A**2
+	return wl_A / 1e4, fnu_jy
+
+
+def calculate_synt_phot_v2(fil_phot_synt, wl_spectrum, fnu_spectrum, efnu_spectrum,
+	                       bandwidth, filter_path, min_coverage=0.9, vega=None,
+	                       zero_point_err=True, n_grid=5000):
+	"""
+	Synthetic photometry from SPHEREx narrow-band measurements.
+
+	Each SPHEREx measurement j is treated as a constant F_nu over a top-hat of
+	width bandwidth_j centered on wl_j (not as a sample of a continuous
+	spectrum). For a photon-counting detector with response T(lambda) the
+	band-averaged flux density is
+
+	    F_syn = sum_j F_nu,j A_j / sum_j A_j,   A_j = int_{dlambda_j} T(lambda)/lambda dlambda
+
+	The whole calculation is done in F_nu, so no (source-dependent) effective
+	wavelength is needed to convert F_lambda to F_nu.
+
+	Parameters
+	----------
+	fil_phot_synt : list of filter names (see get_filter_response)
+	wl_spectrum : wavelengths of the SPHEREx measurements (um)
+	fnu_spectrum, efnu_spectrum : F_nu and its error (Jy)
+	bandwidth : SPHEREx bandwidth of each measurement (um), e.g. the BANDWIDTH
+	    column of the official channel table
+	filter_path : directory with the filter response files
+	min_coverage : minimum fraction of int T/lambda dlambda covered by the
+	    SPHEREx intervals; otherwise the magnitude is NaN
+	vega : None or (wl_um, fnu_jy) of a Vega spectrum (see load_vega_fnu). If
+	    given, the zero point is the Vega flux integrated through the same
+	    filter (self-consistent Vega system); otherwise get_zero_point is used.
+	zero_point_err : include the zero-point uncertainty in the magnitude error
+	    (only for the get_zero_point zero points)
+
+	Returns
+	-------
+	lambda_pivot (um), coverage, phot_synt_mag, ephot_synt_mag,
+	phot_synt_Jy, ephot_synt_Jy, phot_F0_Jy
+	"""
+	wl_spectrum = np.asarray(wl_spectrum, dtype=float)
+	fnu_spectrum = np.asarray(fnu_spectrum, dtype=float)
+	efnu_spectrum = np.asarray(efnu_spectrum, dtype=float)
+	bandwidth = np.asarray(bandwidth, dtype=float) * np.ones_like(wl_spectrum)
+
+	n = len(fil_phot_synt)
+	lambda_pivot = np.ones(n) * np.nan
+	coverage = np.ones(n) * np.nan
+	phot_synt_mag = np.ones(n) * np.nan
+	ephot_synt_mag = np.ones(n) * np.nan
+	phot_synt_Jy = np.ones(n) * np.nan
+	ephot_synt_Jy = np.ones(n) * np.nan
+	phot_F0_Jy = np.ones(n) * np.nan
+
+	good = np.isfinite(wl_spectrum) & np.isfinite(fnu_spectrum) & \
+	       np.isfinite(efnu_spectrum) & np.isfinite(bandwidth) & (bandwidth > 0)
+	wl, fnu, efnu, bw = wl_spectrum[good], fnu_spectrum[good], efnu_spectrum[good], bandwidth[good]
+	lo, hi = wl - bw / 2, wl + bw / 2
+
+	for i in range(n):
+		try:
+			filter_response = get_filter_response(fil_phot_synt[i], filter_path)
+			wave_col, flux_col = filter_response.colnames
+			f_wl = np.asarray(filter_response[wave_col], dtype=float) / 1e4 # um
+			f_T = np.asarray(filter_response[flux_col], dtype=float)
+
+			# Fine grid over the filter and cumulative integral of T/lambda
+			grid = np.linspace(f_wl.min(), f_wl.max(), n_grid)
+			T = np.clip(np.interp(grid, f_wl, f_T), 0, None)
+			integrand = T / grid
+			cum = np.concatenate([[0], np.cumsum(0.5 * (integrand[1:] + integrand[:-1]) * np.diff(grid))])
+			norm = cum[-1]
+
+			# Filter-only pivot wavelength (for reference)
+			lambda_pivot[i] = np.sqrt(_trapezoid(T * grid, grid) / norm)
+
+			# Weight of each SPHEREx interval
+			A = np.interp(hi, grid, cum) - np.interp(lo, grid, cum)
+			use = A > 0
+			if use.sum() == 0:
+				raise ValueError('No SPHEREx data in filter ' + fil_phot_synt[i])
+
+			# Fraction of the filter covered by the union of the intervals
+			covered = np.zeros(grid.size, dtype=bool)
+			for a, b in zip(lo[use], hi[use]):
+				covered |= (grid >= a) & (grid <= b)
+			coverage[i] = _trapezoid(integrand * covered, grid) / norm
+
+			phot_synt_Jy[i] = np.sum(A[use] * fnu[use]) / np.sum(A[use])
+			ephot_synt_Jy[i] = np.sqrt(np.sum((A[use] * efnu[use])**2)) / np.sum(A[use])
+
+			# Zero point
+			if vega is not None:
+				vega_fnu = np.interp(grid, vega[0], vega[1])
+				phot_F0 = _trapezoid(vega_fnu * integrand, grid) / norm
+				ephot_F0 = 0.0
+			else:
+				_, phot_F0, ephot_F0 = get_zero_point(fil_phot_synt[i])
+				if not zero_point_err:
+					ephot_F0 = 0.0
+			phot_F0_Jy[i] = phot_F0
+
+			if coverage[i] < min_coverage or phot_synt_Jy[i] <= 0:
+				continue
+			phot_synt_mag[i] = -2.5 * np.log10(phot_synt_Jy[i] / phot_F0)
+			ephot_synt_mag[i] = (2.5 / np.log(10)) * np.sqrt((ephot_synt_Jy[i] / phot_synt_Jy[i])**2 + (ephot_F0 / phot_F0)**2)
+		except Exception as e:
+			print('calculate_synt_phot_v2: ' + str(fil_phot_synt[i]) + ': ' + str(e))
+
+	return lambda_pivot, coverage, phot_synt_mag, ephot_synt_mag, phot_synt_Jy, ephot_synt_Jy, phot_F0_Jy
+
+
+# Narrow-band (per-channel) synthetic photometry for v2 spectra, merged from spherex_photometry_v2.py.
+
+def synthetic_photometry_v2(spectrum, fil_phot_synt, filter_path, min_coverage=0.9, vega=None,
+                            zero_point_err=True, drop_nonpositive=True):
+    """Synthetic magnitudes from a v2 SPHEREx spectrum (see check_spectra.clean_spectrum_v2)."""
+    flux = np.asarray(spectrum['Flux'], dtype=float)
+    mask = np.isfinite(flux)
+    if drop_nonpositive:
+        mask &= flux > 0
+    _, coverage, mag, emag, _, _, _ = calculate_synt_phot_v2(
+        fil_phot_synt, np.asarray(spectrum['Wave'], dtype=float)[mask], flux[mask] * 1e-6,
+        np.asarray(spectrum['Fluxerr'], dtype=float)[mask] * 1e-6,
+        np.asarray(spectrum['Bandwidth'], dtype=float)[mask], filter_path,
+        min_coverage=min_coverage, vega=vega, zero_point_err=zero_point_err)
+    return np.array(mag), np.array(emag), np.array(coverage)
+
+
+def literature_photometry(known_data, i, fil_phot_synt):
+    """Literature magnitudes and errors (columns <filter> and <filter>_err) of row i; masked -> NaN."""
+    mag = np.array([float(np.ma.filled(known_data[f][i], np.nan)) for f in fil_phot_synt])
+    err = np.array([float(np.ma.filled(known_data[f + '_err'][i], np.nan)) for f in fil_phot_synt])
+    return mag, err
+
+
+def plot_syn_minus_lit(data_phot, data_phot_err, syn_phot, syn_phot_err, fil_phot_synt,
+                       xlim=(10, 18), ylim=(-0.4, 0.4), n_mc=10000, seed=42, title=None):
+    """Synthetic minus literature photometry versus literature magnitude, one panel per filter (same
+    figure as in standards_new / youngstandards)."""
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import AutoMinorLocator
+    from astropy.stats import sigma_clipped_stats
+    from astropy.table import Table
+
+    rng = np.random.default_rng(seed)
+    n = data_phot.shape[0]
+    f, axs = plt.subplots(len(fil_phot_synt), 1, figsize=(6, len(fil_phot_synt) * 1.5), sharex=True)
+    axs = np.atleast_1d(axs)
+    rows = []
+    for j, fil_phot_i in enumerate(fil_phot_synt):
+        syn_mag_dist = rng.normal(syn_phot[:, j], syn_phot_err[:, j], (n_mc, n))
+        lit_mag_dist = rng.normal(data_phot[:, j], data_phot_err[:, j], (n_mc, n))
+        delta = syn_mag_dist - lit_mag_dist
+        delta_j = np.nanmedian(delta, axis=0)
+        delta_std_j = np.nanstd(delta, axis=0)
+
+        good = np.isfinite(delta_j)
+        if good.sum() > 0:
+            mean, median_delta_all, std_delta_all = sigma_clipped_stats(delta_j[good], sigma=3.0, maxiters=5, cenfunc='median')
+        else:
+            median_delta_all, std_delta_all = np.nan, np.nan
+        rows.append([fil_phot_i.replace('I1', 'ch1').replace('I2', 'ch2'), int(good.sum()), median_delta_all, std_delta_all])
+
+        axs[j].fill_between(np.arange(xlim[0], xlim[1] + 1), median_delta_all - std_delta_all,
+                            median_delta_all + std_delta_all, color='lightgray')
+        label = fil_phot_i.replace('I1', 'ch1').replace('I2', 'ch2')
+        axs[j].errorbar(data_phot[:, j], delta_j, yerr=delta_std_j, fmt='.', zorder=1,
+                        label=label + ': ' + str(np.round(median_delta_all, 2)) + r'$\pm$' + str(np.round(std_delta_all, 2)))
+        axs[j].legend(loc=3)
+        axs[j].axhline(0, linestyle='--', color='k')
+        axs[j].set_xlim(*xlim)
+        axs[j].set_ylim(*ylim)
+        axs[j].set_ylabel('Syn - Lit (mag)')
+        axs[j].xaxis.set_minor_locator(AutoMinorLocator())
+        axs[j].yaxis.set_minor_locator(AutoMinorLocator())
+        axs[j].tick_params('both', direction='in', top=True, right=True)
+        axs[j].tick_params('both', which='minor', direction='in', top=True, right=True)
+    axs[-1].set_xlabel('Literature Magnitude (mag)')
+    if title:
+        axs[0].set_title(title)
+    plt.tight_layout()
+
+    stats = Table(rows=rows, names=['Filter', 'N', 'Offset', 'Scatter'])
+    stats['Offset'].format = '.3f'
+    stats['Scatter'].format = '.3f'
+    return f, stats

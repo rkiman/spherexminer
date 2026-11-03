@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
 from packaging.version import Version
 import re
+import os
 
 c = 3*1e8*u.m/u.s
 def jy_to_erg_s_cm2_AA(flux_jy,wavelength_nu):
@@ -74,20 +75,38 @@ def get_closest_standard_spectrum(spt_object,path_data):
 
     return path_standard,find_standard
 
+def _spt_to_num(spt):
+    """'L3' -> 13, 'T4.5' -> 24.5 (same convention as spherexminer turn_spt_to_num)."""
+    spt = str(spt).strip()
+    for letter, offset in (('M', 0.), ('L', 10.), ('T', 20.), ('Y', 30.)):
+        if spt.startswith(letter):
+            return float(spt[1:]) + offset
+    return np.nan
+
+
+def get_closest_standard_spectrum_v2(spt_object, path_data, spectra_dir='data/spectra_v2/'):
+    """Same as spherexminer get_closest_standard_spectrum, but returns the path to the v2 clean
+    spectrum of the closest field standard (written by clean_sample_v2 in standards_new.ipynb)"""
+    standards = Table.read(os.path.join(path_data, 'tables', 'standards.csv'))
+    standards_spt_num = np.array([_spt_to_num(s) for s in standards['SpT']])
+    find_standard = int(np.nanargmin(np.abs(standards_spt_num - spt_object)))
+    name_standard = str(standards['Name'][find_standard])
+    path_standard = os.path.join(spectra_dir, 'Spherex_spec_' + name_standard.replace(' ', '') + '.fits')
+    return path_standard, find_standard
+
+
 def get_not_good_young_standard():
 
-    the_ones_that_dont_look_good = ['Gaia DR2 6273537856003401728','V* DH Tau B','2MASS J07410404-0359495','2MASS J16212830-2529558',
-    'Cl* Melotte   25   CFHT      19','2MASS J02292794-0053282','2MASS J02292794-0053282','2MASS J20135152-2806020','HD  44627B',
-    'ROXs 12B','LP  944-20','2MASS J15165651-2640251','2MASS J06272161-5308428','2MASS J11271382-3735076','2MASS J00464841+0715177',
-    'PSO J318.4243+35.1277','2MASS J09175035+2944455','Cl* Melotte   22   PLIZ      35','2MASS J19350976-6200473','WISE J052857.68+090104.4',
-    '* bet Pic b','Cl* Melotte   22    BRB      17','2MASS J04373705+2331080','2MASS J15575011-2952431','CD-52   381B',
-    'PSO J078.9904+31.0171','2MASS J07123786-6155528','HD 106906B','LSPM J1108+6830','2MASS J13595510-4034582','2MASS J05082480+2422518',
-    'DENIS J065219.7-253450','2MASS J02495436-0558015','2MASS J04144158+2809583','2MASS J20544332-2745512','2MASS J20113196-5048112',
-    '2MASS J01531463-6744181','CD-35  2722B','G 196-3B','2MASS J14252798-3650229','2MASS J12563961-2718455','2MASS J15382417-1953116',
-    'LEHPM 1481B','RX J1609.5-2105B','Cl* Melotte   22    BRB      23','NAME 2MASS J02192210-3925225b','2MASS J09512690-8023553',
-    '2MASSI J0103320+193536','2MASS J08132232-1522043','HD 116434C','SIPS J1256-1257B','NAME AF Lep b','2MASS J00470038+6803543',
-    '2MASS J17410280-4642218','HD 203030B','CWISE J050626.96+073842.4','WISE J124332.17+600126.6','*  51 Eri b','PSO J039.6352-21.7746',
-    '* kap And B','2MASS J23224684-3133231']
+    the_ones_that_dont_look_good = ['Gaia DR2 6273537856003401728','V* DH Tau B','2MASS J07410404-0359495','2MASS J16212830-2529558','Cl* Melotte   25   CFHT      19',
+                                '2MASS J02292794-0053282','2MASS J20135152-2806020','HD  44627B','ROXs 12B','2MASS J06272161-5308428','2MASS J11271382-3735076',
+                                '2MASS J00464841+0715177','2MASS J09175035+2944455','Cl* Melotte   22   PLIZ      35','2MASS J19350976-6200473','WISE J052857.68+090104.4',
+                                '* bet Pic b','Cl* Melotte   22    BRB      17','2MASS J04373705+2331080','CD-52   381B','PSO J078.9904+31.0171','2MASS J07123786-6155528',
+                                'HD 106906B','LSPM J1108+6830', '2MASS J05082480+2422518','2MASS J02495436-0558015','2MASS J04144158+2809583','2MASS J20544332-2745512',
+                                '2MASS J01531463-6744181','CD-35  2722B', 'G 196-3B','2MASS J12563961-2718455','2MASS J15382417-1953116','LEHPM 1481B','RX J1609.5-2105B',
+                                'Cl* Melotte   22    BRB      23','NAME 2MASS J02192210-3925225b','2MASSI J0103320+193536','2MASS J08132232-1522043','HD 116434C',
+                                'SIPS J1256-1257B','NAME AF Lep b','2MASS J00470038+6803543','2MASS J17410280-4642218','HD 203030B',
+                                'CWISE J050626.96+073842.4','WISE J124332.17+600126.6','*  51 Eri b',
+                                '* kap And B', '2MASS J15270961-2626574','2MASS J23225299-6151275']
 
     return the_ones_that_dont_look_good
 
@@ -108,7 +127,227 @@ def get_closest_youngstandard_spectrum(spt_object, path_data):
 
     return path_standard,find_standards
 
-def clean_spherex_spec(spec, snr=1,nbins=4,change_band=False,bin=False,plot=False):
+# SPHEREx detector (band) wavelength ranges in microns. Each of the 6 detectors
+# is divided into 17 nominal channels -> 102 channels in total.
+# Bands are contiguous so that no measurement falls in a gap.
+SPHEREX_BAND_EDGES = [(0.75, 1.11), (1.11, 1.64), (1.64, 2.42),
+                      (2.42, 3.82), (3.82, 4.42), (4.42, 5.00)]
+SPHEREX_N_CHANNELS_PER_BAND = 17
+
+
+def get_spherex_channel_edges(band_edges=SPHEREX_BAND_EDGES,
+                              n_channels=SPHEREX_N_CHANNELS_PER_BAND):
+    """
+    Nominal edges of the 102 SPHEREx spectral channels.
+
+    Within each detector the LVF gives constant resolving power, so the
+    channels are evenly spaced in log(wavelength) between the band edges.
+
+    Returns
+    -------
+    edges : list of np.ndarray
+        One array of n_channels+1 edges (um) per band.
+    """
+    return [np.geomspace(wmin, wmax, n_channels + 1) for wmin, wmax in band_edges]
+
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_CHANNEL_FILE = os.path.join(_HERE, 'spectral_channels_spx_cal-sch-v1-2026-106.fits')
+_channel_cache = {}
+
+
+def read_spherex_channels(channel_table=None):
+    """Official SPHEREx channel definitions (IRSA spectral_channels_spx_cal-sch-*.fits)."""
+    if channel_table is None:
+        channel_table = DEFAULT_CHANNEL_FILE
+    if isinstance(channel_table, str):
+        if channel_table not in _channel_cache:
+            _channel_cache[channel_table] = Table.read(channel_table, hdu='SPECTRAL_CHANNELS')
+        return _channel_cache[channel_table]
+    return channel_table
+
+
+def channel_ids(channel_table=None):
+    """Channel identifier 100 * DETECTOR + SUBCHAN (e.g. 305 = detector 3, channel 5)."""
+    ch = read_spherex_channels(channel_table)
+    return 100 * np.asarray(ch['DETECTOR'], dtype=int) + np.asarray(ch['SUBCHAN'], dtype=int)
+
+
+def assign_spherex_channels(wave, channel_table=None):
+    """Row of the channel table for each wavelength."""
+    ch = read_spherex_channels(channel_table)
+    wave = np.atleast_1d(np.asarray(wave, dtype=float))
+    wl_c = np.asarray(ch['WAVELENGTH'], dtype=float)
+    wl_min = np.asarray(ch['WL_MIN'], dtype=float)
+    wl_max = np.asarray(ch['WL_MAX'], dtype=float)
+
+    dist = np.abs(wave[:, None] - wl_c[None, :])
+    inside = (wave[:, None] >= wl_min[None, :]) & (wave[:, None] <= wl_max[None, :])
+    row = np.argmin(np.where(inside, dist, np.inf), axis=1)
+    outside = ~inside.any(axis=1)
+    row[outside] = np.argmin(dist[outside], axis=1)
+    return row
+
+
+_channel_map_cache = {}
+
+
+def read_spherex_channel_map(channel_file=None):
+    """Pixel -> sub-channel map (CHANNEL_MAP hdu, values 1-17; 0/18 = outside nominal channels)."""
+    if channel_file is None:
+        channel_file = DEFAULT_CHANNEL_FILE
+    if channel_file not in _channel_map_cache:
+        _channel_map_cache[channel_file] = fits.getdata(channel_file, 'CHANNEL_MAP')
+    return _channel_map_cache[channel_file]
+
+
+def get_spherex_channel(x, y, detector, wave=None, channel_file=None):
+    """
+    SPHEREx spectral channel of one measurement.
+
+    The sub-channel (1-17) is read from the official CHANNEL_MAP at the
+    (0-based) pixel position x, y of the source in the L2 image; the map is
+    the same for the 6 detectors. If the pixel lies outside the 17 nominal
+    channels (map value 0 or 18, detector edges) or x, y are not available,
+    the closest channel of that detector in wavelength is used instead.
+
+    Returns
+    -------
+    detector : int (1-6)
+    subchan : int (1-17)
+    channel : int, 100 * detector + subchan (e.g. 305), as in channel_ids()
+    from_map : bool, True if the sub-channel comes from the pixel map
+    """
+    detector = int(detector)
+    subchan, from_map = 0, False
+    if x is not None and y is not None and np.isfinite(x) and np.isfinite(y):
+        cmap = read_spherex_channel_map(channel_file)
+        ix, iy = int(np.round(float(x))), int(np.round(float(y)))
+        if 0 <= iy < cmap.shape[0] and 0 <= ix < cmap.shape[1]:
+            subchan = int(cmap[iy, ix])
+            from_map = 1 <= subchan <= SPHEREX_N_CHANNELS_PER_BAND
+    if not from_map:
+        if wave is None or not np.isfinite(wave):
+            return detector, -1, -1, False
+        ch = read_spherex_channels(channel_file)
+        sel = np.asarray(ch['DETECTOR'], dtype=int) == detector
+        wl_c = np.asarray(ch['WAVELENGTH'], dtype=float)[sel]
+        sub = np.asarray(ch['SUBCHAN'], dtype=int)[sel]
+        subchan = int(sub[np.argmin(np.abs(wl_c - float(wave)))])
+    return detector, subchan, 100 * detector + subchan, from_map
+
+
+def detector_from_bandpass(bandpassname):
+    """Detector number from IRSA's energy_bandpassname, e.g. 'SPHEREx-D3' -> 3."""
+    m = re.search(r'D(\d)', str(bandpassname))
+    return int(m.group(1)) if m else -1
+
+
+def combine_spherex_per_channel(wave, flux, fluxerr, error_method='birge',
+                                wave_method='weighted', channel_table=None):
+    """
+    Combine all multi-epoch SPHEREx measurements that fall in the same channel
+    into a single measurement.
+
+    Parameters
+    ----------
+    wave, flux, fluxerr : array-like
+        Individual measurements (any flux unit; errors in the same unit).
+    error_method : 'birge' or 'quadrature'
+        How the epoch-to-epoch scatter is propagated into the channel error.
+        'birge'      : error of the weighted mean inflated by sqrt(chi2_red)
+                       when the points scatter more than their errors predict.
+        'quadrature' : error of the weighted mean added in quadrature to the
+                       standard error of the mean of the scatter (std/sqrt(N)).
+    wave_method : 'weighted' or 'center'
+        Wavelength assigned to the channel: inverse-variance weighted mean of
+        the measured wavelengths, or the nominal channel center.
+    channel_table : None, str or Table
+        Official SPHEREx channel definitions (spectral_channels_spx_cal-sch-*.fits).
+        If None, an approximate definition is used (17 log-spaced channels per
+        detector between the design band edges).
+
+    Returns
+    -------
+    wave_c, flux_c, fluxerr_c, npoints, bandwidth_c, channel_id : np.ndarray
+        channel_id is 100*DETECTOR + SUBCHAN (e.g. 305 = detector 3, channel 5).
+    """
+    wave = np.asarray(wave, dtype=float)
+    flux = np.asarray(flux, dtype=float)
+    fluxerr = np.asarray(fluxerr, dtype=float)
+
+    good = np.isfinite(wave) & np.isfinite(flux) & np.isfinite(fluxerr) & (fluxerr > 0)
+    wave, flux, fluxerr = wave[good], flux[good], fluxerr[good]
+
+    if channel_table is not None:
+        channel_table = read_spherex_channels(channel_table)
+        row = assign_spherex_channels(wave, channel_table)
+        chan_center = np.asarray(channel_table['WAVELENGTH'], dtype=float)
+        chan_bw = np.asarray(channel_table['BANDWIDTH'], dtype=float)
+        chan_id = 100 * np.asarray(channel_table['DETECTOR'], dtype=int) + \
+                  np.asarray(channel_table['SUBCHAN'], dtype=int)
+    else:
+        all_edges = get_spherex_channel_edges()
+        lo = np.concatenate([e[:-1] for e in all_edges])
+        hi = np.concatenate([e[1:] for e in all_edges])
+        chan_center = np.sqrt(lo * hi)
+        chan_bw = hi - lo
+        chan_id = np.concatenate([100 * (b + 1) + np.arange(1, len(e))
+                                  for b, e in enumerate(all_edges)])
+        # Points slightly outside the nominal 0.75-5.00 um range go to the
+        # first/last channel (only used for binning)
+        wave_bin = np.clip(wave, lo[0], np.nextafter(hi[-1], 0))
+        row = np.searchsorted(hi, wave_bin, side='right')
+        row = np.clip(row, 0, len(lo) - 1)
+
+    wave_c, flux_c, fluxerr_c, npoints, bw_c, id_c = [], [], [], [], [], []
+    for k in np.unique(row):
+        m = row == k
+        n = m.sum()
+        w = 1.0 / fluxerr[m]**2
+        f_mean = np.sum(w * flux[m]) / np.sum(w)
+        e_mean = 1.0 / np.sqrt(np.sum(w))
+        if n > 1:
+            chi2_red = np.sum(w * (flux[m] - f_mean)**2) / (n - 1)
+            if error_method == 'birge':
+                e_mean = e_mean * np.sqrt(max(1.0, chi2_red))
+            elif error_method == 'quadrature':
+                e_mean = np.sqrt(e_mean**2 + np.std(flux[m], ddof=1)**2 / n)
+            else:
+                raise ValueError("error_method must be 'birge' or 'quadrature'")
+        if wave_method == 'weighted':
+            wl = np.sum(w * wave[m]) / np.sum(w)
+        else:
+            wl = chan_center[k]
+        wave_c.append(wl)
+        flux_c.append(f_mean)
+        fluxerr_c.append(e_mean)
+        npoints.append(n)
+        bw_c.append(chan_bw[k])
+        id_c.append(chan_id[k])
+
+    order = np.argsort(wave_c)
+    return (np.array(wave_c)[order], np.array(flux_c)[order],
+            np.array(fluxerr_c)[order], np.array(npoints)[order],
+            np.array(bw_c)[order], np.array(id_c)[order])
+
+
+def clean_spherex_spec(spec, snr=1,nbins=4,change_band=False,bin=False,plot=False,
+                       combine_channels=False,error_method='birge',wave_method='weighted',
+                       channel_table=None):
+    """
+    combine_channels : if True, all multi-epoch measurements falling in the same
+        nominal SPHEREx channel (102 channels, 17 per detector) are combined into
+        one point with combine_spherex_per_channel (see error_method / wave_method).
+        The output then has the columns Wave [um], Flux [uJy], Flux err [uJy],
+        Npoints, Bandwidth [um] and Channel (100*detector + subchannel).
+    channel_table : path to (or Table of) the official SPHEREx channel definitions
+        (spectral_channels_spx_cal-sch-*.fits). If given, it is used to assign
+        channels and bandwidths; if combine_channels=False the points are kept
+        and Bandwidth [um] and Channel columns are added. If None, an approximate
+        17-channels-per-detector log-spaced definition is used.
+        This only returns a new table; nothing is written to disk.
+    """
     columns = spec.colnames
     # Sorting by wavelength 
     spec.sort(columns[0])
@@ -190,8 +429,24 @@ def clean_spherex_spec(spec, snr=1,nbins=4,change_band=False,bin=False,plot=Fals
 
         # Signal to noise cut
         spec = spec[spec['Flux [uJy]']/spec['Flux err [uJy]'] > snr]
-    
-    
+
+    # Combine multi-epoch measurements per SPHEREx channel
+    if combine_channels:
+        wave_c, flux_c, fluxerr_c, npoints, bw_c, id_c = combine_spherex_per_channel(
+            spec['Wave [um]'], spec['Flux [uJy]'], spec['Flux err [uJy]'],
+            error_method=error_method, wave_method=wave_method,
+            channel_table=channel_table)
+        spec = Table([wave_c, flux_c, fluxerr_c, npoints, bw_c, id_c],
+                     names=['Wave [um]', 'Flux [uJy]', 'Flux err [uJy]', 'Npoints',
+                            'Bandwidth [um]', 'Channel'])
+    elif channel_table is not None:
+        # Keep all points, but add the bandwidth and channel of each one
+        channel_table = read_spherex_channels(channel_table)
+        row = assign_spherex_channels(spec['Wave [um]'], channel_table)
+        spec['Bandwidth [um]'] = np.asarray(channel_table['BANDWIDTH'], dtype=float)[row]
+        spec['Channel'] = 100 * np.asarray(channel_table['DETECTOR'], dtype=int)[row] + \
+                          np.asarray(channel_table['SUBCHAN'], dtype=int)[row]
+
     return spec
 
 def gravity_to_num(x):
@@ -497,3 +752,28 @@ def update_psf_header(old_hdul):
     new_hdul['PRIMARY'].header["VERSION"] = new_hdul['PRIMARY'].header["VERSION"] + "+psffix1" # SET NEW VERSION HERE
 
     return(new_hdul)
+
+def calculate_abs_mag(mag,mag_err,parallax,parallax_err):
+    abs_mag = np.ones(len(mag))*np.nan
+    mag_abs_err = np.ones(len(mag))*np.nan
+    
+    for i in range(len(abs_mag)):
+        dist_mag = np.random.normal(mag[i],mag_err[i],10000)
+        dist_parallax = np.random.normal(parallax[i],parallax_err[i],10000)
+
+        dist_abs_mag = dist_mag - 5*(np.log10(1e3/dist_parallax)-1)
+        abs_mag[i] = np.nanmedian(dist_abs_mag)
+        mag_abs_err[i] = np.nanstd(dist_abs_mag)
+    #dist = 1e3 / parallax
+    #abs_mag = mag - 5 * (np.log10(dist) - 1)
+    
+    # partial derivative w.r.t. parallax
+    #d_abs_d_plx = 5 / (parallax * np.log(10))
+    
+    #mag_abs_err = np.sqrt(mag_err**2 + (d_abs_d_plx * parallax_err)**2)
+    return abs_mag,mag_abs_err
+
+def calculate_color(mag1,mag1_err,mag2,mag2_err):
+    color = mag1-mag2
+    color_err = np.sqrt(mag1_err**2+mag2_err**2)
+    return color,color_err

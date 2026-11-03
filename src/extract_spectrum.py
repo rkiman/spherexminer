@@ -16,12 +16,49 @@ from matplotlib.gridspec import GridSpec
 import astropy
 import requests
 import os
+import json
+import tempfile
 
 from .flux_renormalize import *
 from .extras import *
 
+
+CHECKPOINT_DIR = 'checkpoints'   # sub-folder of path_data holding all checkpoints
+
+
+def checkpoint_path(name, path_data):
+    """
+    Checkpoint file of one object: <path_data>/checkpoints/<name>_checkpoint.json.
+    The folder is created if needed. A checkpoint left by older versions
+    directly in <path_data> is moved there so the run can resume from it.
+    """
+    folder = os.path.join(path_data, CHECKPOINT_DIR)
+    os.makedirs(folder, exist_ok=True)
+    new = os.path.join(folder, name + '_checkpoint.json')
+    old = os.path.join(path_data, name + '_checkpoint.json')
+    if not os.path.exists(new) and os.path.exists(old):
+        os.replace(old, new)
+    return new
+
+
+def _load_checkpoint(checkpoint_file):
+    """Load per-image checkpoint data if it exists."""
+    if os.path.exists(checkpoint_file):
+        with open(checkpoint_file, 'r') as f:
+            return json.load(f)
+    return {}
+
+
+def _save_checkpoint(checkpoint_file, data):
+    """Persist per-image checkpoint data atomically."""
+    tmp = checkpoint_file + '.tmp'
+    with open(tmp, 'w') as f:
+        json.dump(data, f)
+    os.replace(tmp, checkpoint_file)
+
+
 def extract_spectrum(name,results_irsa,ra_deg,dec_deg,pmra,pmdec,epoch,perc,
-                     path_figures,path_data):
+                     path_figures,path_data,checkpoint_file=None):
     '''
     Main function to extract spectra from SPHEREx
     name (str) Objects name
@@ -44,8 +81,17 @@ def extract_spectrum(name,results_irsa,ra_deg,dec_deg,pmra,pmdec,epoch,perc,
     r_in_array = [] # Inner radius from background ring used in each image
     r_out_array = [] # Outer radius from background ring used in each image
     obs_date_mjd_array = [] # Epoch for each image
+    detector_array = [] # SPHEREx detector (1-6) of each image
+    subchan_array = [] # Sub-channel (1-17) within the detector
+    channel_array = [] # Channel id = 100*detector + subchan (one of the 102)
+    channel_from_map_array = [] # True if channel read from the CHANNEL_MAP pixel map
 
     results_spec = Table() # Final table with full spectrum
+
+    # Load checkpoint — resumes from last successful image if previous run broke
+    if checkpoint_file is None:
+        checkpoint_file = checkpoint_path(name, path_data)
+    checkpoint = _load_checkpoint(checkpoint_file)
 
     # Loop over all the images for each object
     for i in range(len(results_irsa)):
@@ -53,9 +99,35 @@ def extract_spectrum(name,results_irsa,ra_deg,dec_deg,pmra,pmdec,epoch,perc,
         spectral_image_url = results_irsa['access_url'][i]
         print(f'{i} out of {len(results_irsa)}:' + spectral_image_url)
 
+        # Resume: if this image was already processed in a previous run, restore
+        # its results from the checkpoint and skip the download entirely.
+        if spectral_image_url in checkpoint:
+            entry = checkpoint[spectral_image_url]
+            wave.append(entry['wave'])
+            flux.append(entry['flux'])
+            flux_err.append(entry['flux_err'])
+            r_ap_array.append(entry['r_ap'])
+            r_in_array.append(entry['r_in'])
+            r_out_array.append(entry['r_out'])
+            obs_date_mjd_array.append(entry['obs_date_mjd'])
+            if 'channel' in entry:
+                det, sub, chan, from_map = (entry['detector'], entry['subchan'],
+                                            entry['channel'], entry['channel_from_map'])
+            else:   # checkpoint written before channels were saved
+                det = detector_from_bandpass(results_irsa['energy_bandpassname'][i])
+                det, sub, chan, from_map = get_spherex_channel(
+                    entry.get('x'), entry.get('y'), det, entry['wave'])
+            detector_array.append(det)
+            subchan_array.append(sub)
+            channel_array.append(chan)
+            channel_from_map_array.append(from_map)
+            print(f'  -> loaded from checkpoint, skipping download')
+            continue
+
         # Download image
         # Repeat the task until it works given that IRSA fails sometimes
-        output_path = path_data + "temporary.fits"
+        # Use a unique temp path so parallel workers don't collide
+        output_path = tempfile.mktemp(suffix='.fits', dir=path_data)
         downloaded = 0
         while downloaded == 0:
             try:
@@ -109,6 +181,17 @@ def extract_spectrum(name,results_irsa,ra_deg,dec_deg,pmra,pmdec,epoch,perc,
         spectral_wcs.sip = None
         wl, bw = spectral_wcs.pixel_to_world(x_rel, y_rel)
         wave.append(wl.value)
+
+        # SPHEREx channel (one of the 102) of this measurement
+        detector = spectral_image_header.get('DETECTOR')
+        if detector is None:
+            detector = detector_from_bandpass(results_irsa['energy_bandpassname'][i])
+        det, sub, chan, from_map = get_spherex_channel(x_rel, y_rel, detector,
+                                                       float(wl.value))
+        detector_array.append(det)
+        subchan_array.append(sub)
+        channel_array.append(chan)
+        channel_from_map_array.append(from_map)
 
         obs_date_mjd_array.append(obs_date_mjd)
 
@@ -176,6 +259,24 @@ def extract_spectrum(name,results_irsa,ra_deg,dec_deg,pmra,pmdec,epoch,perc,
                     dpi=100, bbox_inches = 'tight')
         plt.close(fig)
 
+        # Save extracted numbers to checkpoint — tiny cost, protects against restarts
+        checkpoint[spectral_image_url] = {
+            'wave': wl.value,
+            'flux': flux_j,
+            'flux_err': flux_err_j,
+            'r_ap': [float(r) for r in r_aperture],
+            'r_in': [float(r) for r in r_in],
+            'r_out': [float(r) for r in r_out],
+            'obs_date_mjd': float(obs_date_mjd),
+            'x': float(x_rel),
+            'y': float(y_rel),
+            'detector': int(det),
+            'subchan': int(sub),
+            'channel': int(chan),
+            'channel_from_map': bool(from_map),
+        }
+        _save_checkpoint(checkpoint_file, checkpoint)
+
         # Delete temporary file created to download the full data that is not needed
         astropy.utils.data.clear_download_cache(hashorurl=None, pkgname='astropy')
 
@@ -206,6 +307,16 @@ def extract_spectrum(name,results_irsa,ra_deg,dec_deg,pmra,pmdec,epoch,perc,
     results_spec['OBSMJD'] = np.array(obs_date_mjd_array)
     results_spec['OBSMJD'].description = 'Observation date (MJD)'
 
+    results_spec['DETECTOR'] = np.array(detector_array, dtype=int)
+    results_spec['DETECTOR'].description = 'SPHEREx detector (1-6)'
+    results_spec['SUBCHAN'] = np.array(subchan_array, dtype=int)
+    results_spec['SUBCHAN'].description = 'Spectral sub-channel within the detector (1-17)'
+    results_spec['CHANNEL'] = np.array(channel_array, dtype=int)
+    results_spec['CHANNEL'].description = 'SPHEREx channel id = 100*DETECTOR + SUBCHAN (102 channels)'
+    results_spec['CHANNEL_FROM_MAP'] = np.array(channel_from_map_array, dtype=bool)
+    results_spec['CHANNEL_FROM_MAP'].description = ('True: channel read from the CHANNEL_MAP at the source pixel; '
+                                                    'False: pixel outside the nominal channels, closest channel in wavelength')
+
     results_spec.meta['NAME'] = name
     results_spec.meta['RA'] = ra_deg
     results_spec.meta['DEC'] = dec_deg
@@ -221,6 +332,7 @@ def extract_spectrum(name,results_irsa,ra_deg,dec_deg,pmra,pmdec,epoch,perc,
     'PMRA, PMDEC: proper motion in mas/yr',
     'EPOCH: epoch of the position',
     'PERC: aperture correction percentage',
+    'CHANNEL: 100*DETECTOR + SUBCHAN, from spectral_channels_spx_cal-sch-v1-2026-106.fits',
     ]
     
     # Plot final spectrum
@@ -238,8 +350,11 @@ def extract_spectrum(name,results_irsa,ra_deg,dec_deg,pmra,pmdec,epoch,perc,
     #plt.show()
     plt.close()
 
-    return results_spec
+    # All images done — remove checkpoint now that the final .fits is written by caller
+    if os.path.exists(checkpoint_file):
+        os.remove(checkpoint_file)
 
+    return results_spec
 
 
 def move_forward_position(ra,dec,pmra,pmdec,epoch,new_epoch):
@@ -430,7 +545,7 @@ def study_different_apertures(x_rel, y_rel, image_data, image_data_err,
     '''
     Compare flux using different apertures
     '''
-    r_aperture_test_image = np.linspace(0.1,5,100)
+    r_aperture_test_image = np.linspace(0.1,5,20)  # 20 pts is sufficient for smooth curve
     r_aperture_test_psf = r_aperture_test_image*oversample
 
     ap_corr_array = []
