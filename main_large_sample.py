@@ -40,7 +40,7 @@ path_figures = 'Figures/'
 path_data = 'Data/spectra/'
 perc = [0.9, 0.95, 0.98]  # Percentage of flux to choose r_aperture
 OVERWRITE = False         # True -> redo objects with a .fits (also deletes their checkpoint)
-DELETE_FIGURES = True     # remove Figures/<name>/ once the .fits is saved
+DELETE_FIGURES = False     # remove Figures/<name>/ once the .fits is saved
 SUMMARY_FILE = 'Data/summary_large_sample.csv'
 
 

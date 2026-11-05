@@ -68,7 +68,7 @@ The `.fits` files from the main scripts are *raw*: they have every measurement (
 
 - For each object it picks the aperture (90, 95 or 98%) whose synthetic photometry best matches the literature photometry.
 - It groups the points by SPHEREx channel, using the `CHANNEL` column of the raw spectrum (or the official channel definitions from the wavelength, for older extractions without it), and combines all epochs in each channel (weighted mean; the error is inflated if the epochs scatter more than their errors).
-- It shows an interactive window to flag extreme outliers by hand (`check_outliers=True`).
+- It shows an interactive window to flag extreme outliers by hand (`check_outliers=True`, see [Interactive outlier check](#interactive-outlier-check)).
 
 Example adapted from `low-gravity-LTdwarfs/standards.ipynb`:
 
@@ -113,3 +113,12 @@ Options:
 
 - To use a single aperture for everyone, set `perc=0.95` (no photometry needed).
 - To also drop points you removed by hand in an earlier version, add `reference_dir='data/spectra_v1/'`.
+- To save the points you remove in the outlier check (one `<name>_removed_points.ecsv` per object), add `outlier_dir='data/spectra_v2/outliers/'`. On later runs the saved choices are reused without asking again; set `recheck_outliers=True` to redo the check.
+
+### Interactive outlier check
+
+With `check_outliers=True` and `interactive=True` (the defaults), each object with extreme outliers (more than `outlier_sigma`, default 8σ, from a running median) opens a window with all its measurements. The flagged points are circled in red and preselected. Click or drag a box to select points (shift-drag deselects); **Select flagged** and **Clear** reset the selection. Press **Done** (or Enter, or close the window) to remove the selected points and move to the next object.
+
+You can run it from a notebook with `%matplotlib inline`. The click-and-wait loop only works in a desktop window, so `clean_sample_v2` switches matplotlib once to the first desktop backend that loads, in the order given by `GUI_BACKENDS` in `src/check_spectra.py` (`macosx`, `qtagg`, `tkagg`), and switches back to the notebook backend when it finishes. If no desktop backend is available (for example on a remote server), it falls back to a static plot with the flagged points numbered and a text prompt to choose which to remove.
+
+To skip the manual step, use `interactive=False` (all flagged points are removed) or `check_outliers=False` (no outlier check).

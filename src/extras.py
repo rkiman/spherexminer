@@ -96,17 +96,16 @@ def get_closest_standard_spectrum_v2(spt_object, path_data, spectra_dir='data/sp
 
 
 def get_not_good_young_standard():
-
     the_ones_that_dont_look_good = ['Gaia DR2 6273537856003401728','V* DH Tau B','2MASS J07410404-0359495','2MASS J16212830-2529558','Cl* Melotte   25   CFHT      19',
-                                '2MASS J02292794-0053282','2MASS J20135152-2806020','HD  44627B','ROXs 12B','2MASS J06272161-5308428','2MASS J11271382-3735076',
-                                '2MASS J00464841+0715177','2MASS J09175035+2944455','Cl* Melotte   22   PLIZ      35','2MASS J19350976-6200473','WISE J052857.68+090104.4',
-                                '* bet Pic b','Cl* Melotte   22    BRB      17','2MASS J04373705+2331080','CD-52   381B','PSO J078.9904+31.0171','2MASS J07123786-6155528',
-                                'HD 106906B','LSPM J1108+6830', '2MASS J05082480+2422518','2MASS J02495436-0558015','2MASS J04144158+2809583','2MASS J20544332-2745512',
-                                '2MASS J01531463-6744181','CD-35  2722B', 'G 196-3B','2MASS J12563961-2718455','2MASS J15382417-1953116','LEHPM 1481B','RX J1609.5-2105B',
-                                'Cl* Melotte   22    BRB      23','NAME 2MASS J02192210-3925225b','2MASSI J0103320+193536','2MASS J08132232-1522043','HD 116434C',
-                                'SIPS J1256-1257B','NAME AF Lep b','2MASS J00470038+6803543','2MASS J17410280-4642218','HD 203030B',
-                                'CWISE J050626.96+073842.4','WISE J124332.17+600126.6','*  51 Eri b',
-                                '* kap And B', '2MASS J15270961-2626574','2MASS J23225299-6151275']
+                                    '2MASS J02292794-0053282','2MASS J20135152-2806020','HD  44627B','ROXs 12B','2MASS J06272161-5308428','2MASS J11271382-3735076',
+                                    '2MASS J00464841+0715177','2MASS J09175035+2944455','Cl* Melotte   22   PLIZ      35','2MASS J19350976-6200473','WISE J052857.68+090104.4',
+                                    '* bet Pic b','Cl* Melotte   22    BRB      17','2MASS J04373705+2331080','CD-52   381B','PSO J078.9904+31.0171','2MASS J07123786-6155528',
+                                    'HD 106906B','LSPM J1108+6830', '2MASS J05082480+2422518','2MASS J02495436-0558015','2MASS J04144158+2809583','2MASS J20544332-2745512',
+                                    '2MASS J01531463-6744181','CD-35  2722B', 'G 196-3B','2MASS J12563961-2718455','2MASS J15382417-1953116','LEHPM 1481B','RX J1609.5-2105B',
+                                    'Cl* Melotte   22    BRB      23','NAME 2MASS J02192210-3925225b','2MASSI J0103320+193536','2MASS J08132232-1522043','HD 116434C',
+                                    'SIPS J1256-1257B','NAME AF Lep b','2MASS J00470038+6803543','2MASS J17410280-4642218','HD 203030B',
+                                    'CWISE J050626.96+073842.4','WISE J124332.17+600126.6','*  51 Eri b',
+                                    '* kap And B', '2MASS J15270961-2626574','2MASS J23225299-6151275','PSO J039.6352-21.7746','2MASS J07180871-6415310']
 
     return the_ones_that_dont_look_good
 
@@ -428,7 +427,7 @@ def clean_spherex_spec(spec, snr=1,nbins=4,change_band=False,bin=False,plot=Fals
         spec[columns[2]] = fluxerr
 
         # Signal to noise cut
-        spec = spec[spec['Flux [uJy]']/spec['Flux err [uJy]'] > snr]
+        #spec = spec[spec['Flux [uJy]']/spec['Flux err [uJy]'] > snr]
 
     # Combine multi-epoch measurements per SPHEREx channel
     if combine_channels:

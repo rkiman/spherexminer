@@ -628,6 +628,15 @@ def find_extreme_outliers(points, nsigma=8.0, half_window=7, scatter='local', sc
     return flag
 
 
+# Matplotlib backends for the interactive outlier check (_switch_to_gui_backend). The click-and-wait
+# loop only works in a desktop window: notebook backends (matched by substring of the backend name,
+# e.g. 'module://matplotlib_inline.backend_inline') and non-interactive backends are switched to the
+# first GUI backend in GUI_BACKENDS that can be loaded.
+_NOTEBOOK_BACKEND_KEYS = ('inline', 'ipympl', 'widget', 'nbagg', 'notebook')
+_NONINTERACTIVE_BACKENDS = ('agg', 'pdf', 'ps', 'svg', 'pgf', 'cairo', 'template')
+GUI_BACKENDS = ('macosx', 'qtagg', 'tkagg')
+
+
 def _switch_to_gui_backend():
     """The click-and-wait loop only works in a desktop window."""
     import matplotlib
